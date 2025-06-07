@@ -1,0 +1,181 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\Game;
+use App\Models\Leaderboard;
+use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+
+class LeaderboardController extends Controller
+{
+    /**
+     * Get global leaderboards for all games
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $period = $request->get('period', 'all'); // all, daily, weekly, monthly
+        $limit = min($request->get('limit', 50), 100);
+
+        $query = Leaderboard::with(['user', 'game'])
+            ->orderBy('best_score', 'desc');
+
+        // Apply time filters
+        switch ($period) {
+            case 'daily':
+                $query->whereDate('last_played', today());
+                break;
+            case 'weekly':
+                $query->where('last_played', '>=', now()->startOfWeek());
+                break;
+            case 'monthly':
+                $query->where('last_played', '>=', now()->startOfMonth());
+                break;
+        }
+
+        $leaderboards = $query->limit($limit)->get()->map(function ($entry, $index) {
+            return [
+                'rank' => $index + 1,
+                'user' => [
+                    'id' => $entry->user->id,
+                    'name' => $entry->user->name,
+                    'level' => $entry->user->level,
+                    'avatar' => $entry->user->avatar
+                ],
+                'game' => [
+                    'id' => $entry->game->id,
+                    'name' => $entry->game->name,
+                    'slug' => $entry->game->slug,
+                    'icon' => $entry->game->icon
+                ],
+                'best_score' => $entry->best_score,
+                'total_plays' => $entry->total_plays,
+                'last_played' => $entry->last_played
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'period' => $period,
+                'leaderboards' => $leaderboards
+            ]
+        ]);
+    }
+
+    /**
+     * Get leaderboard for specific game
+     */
+    public function show(Request $request, Game $game): JsonResponse
+    {
+        $period = $request->get('period', 'all');
+        $limit = min($request->get('limit', 50), 100);
+
+        $query = Leaderboard::with('user')
+            ->where('game_id', $game->id)
+            ->orderBy('best_score', 'desc');
+
+        // Apply time filters
+        switch ($period) {
+            case 'daily':
+                $query->whereDate('last_played', today());
+                break;
+            case 'weekly':
+                $query->where('last_played', '>=', now()->startOfWeek());
+                break;
+            case 'monthly':
+                $query->where('last_played', '>=', now()->startOfMonth());
+                break;
+        }
+
+        $leaderboards = $query->limit($limit)->get()->map(function ($entry, $index) {
+            return [
+                'rank' => $index + 1,
+                'user' => [
+                    'id' => $entry->user->id,
+                    'name' => $entry->user->name,
+                    'level' => $entry->user->level,
+                    'avatar' => $entry->user->avatar
+                ],
+                'best_score' => $entry->best_score,
+                'total_plays' => $entry->total_plays,
+                'last_played' => $entry->last_played
+            ];
+        });
+
+        // Get game statistics
+        $stats = [
+            'total_players' => Leaderboard::where('game_id', $game->id)->count(),
+            'total_plays' => Leaderboard::where('game_id', $game->id)->sum('total_plays'),
+            'average_score' => Leaderboard::where('game_id', $game->id)->avg('best_score'),
+            'highest_score' => Leaderboard::where('game_id', $game->id)->max('best_score')
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'game' => [
+                    'id' => $game->id,
+                    'name' => $game->name,
+                    'slug' => $game->slug,
+                    'icon' => $game->icon
+                ],
+                'period' => $period,
+                'stats' => $stats,
+                'leaderboards' => $leaderboards
+            ]
+        ]);
+    }
+
+    /**
+     * Get user's leaderboard statistics
+     */
+    public function userStats(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $userLeaderboards = $user->leaderboards()
+            ->with('game')
+            ->orderBy('best_score', 'desc')
+            ->get()
+            ->map(function ($entry) use ($user) {
+                // Get user's rank for this game
+                $rank = Leaderboard::where('game_id', $entry->game_id)
+                    ->where('best_score', '>', $entry->best_score)
+                    ->count() + 1;
+
+                return [
+                    'game' => [
+                        'id' => $entry->game->id,
+                        'name' => $entry->game->name,
+                        'slug' => $entry->game->slug,
+                        'icon' => $entry->game->icon
+                    ],
+                    'best_score' => $entry->best_score,
+                    'total_plays' => $entry->total_plays,
+                    'rank' => $rank,
+                    'last_played' => $entry->last_played
+                ];
+            });
+
+        // Overall user statistics
+        $overallStats = [
+            'total_games_played' => $user->rounds()->whereNotNull('completed_at')->count(),
+            'total_tokens_earned' => $user->rounds()->sum('reward_tokens'),
+            'average_score' => $user->rounds()->whereNotNull('completed_at')->avg('score'),
+            'best_overall_score' => $user->rounds()->whereNotNull('completed_at')->max('score'),
+            'games_mastered' => $userLeaderboards->count(),
+            'current_level' => $user->level,
+            'total_experience' => $user->experience
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'overall_stats' => $overallStats,
+                'game_stats' => $userLeaderboards
+            ]
+        ]);
+    }
+} 

@@ -1,0 +1,139 @@
+# AHAZ Gaming Platform - High Performance MySQL Configuration
+# ===========================================================
+# Optimized for Ubuntu 22.04 LTS with 4GB+ RAM
+# Place this file in /etc/mysql/mysql.conf.d/99-ahaz-performance.cnf
+
+[mysqld]
+# Basic Settings
+user = mysql
+pid-file = /var/run/mysqld/mysqld.pid
+socket = /var/run/mysqld/mysqld.sock
+port = 3306
+basedir = /usr
+datadir = /var/lib/mysql
+tmpdir = /tmp
+lc-messages-dir = /usr/share/mysql
+bind-address = 127.0.0.1
+mysqlx-bind-address = 127.0.0.1
+
+# Character Set and Collation
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+init-connect = 'SET NAMES utf8mb4'
+
+# Connection Settings
+max_connections = 200
+max_user_connections = 190
+thread_cache_size = 16
+thread_stack = 256K
+max_connect_errors = 1000000
+
+# Memory Settings (adjust based on available RAM)
+# For 4GB RAM server, allocate ~70% to MySQL
+innodb_buffer_pool_size = 2G
+innodb_buffer_pool_instances = 2
+innodb_log_buffer_size = 64M
+key_buffer_size = 128M
+max_heap_table_size = 128M
+tmp_table_size = 128M
+sort_buffer_size = 2M
+read_buffer_size = 2M
+read_rnd_buffer_size = 1M
+join_buffer_size = 2M
+
+# Query Cache (disabled in MySQL 8.0+, but keeping for compatibility)
+query_cache_type = 0
+query_cache_size = 0
+
+# InnoDB Settings for High Performance
+innodb_file_per_table = 1
+innodb_flush_method = O_DIRECT
+innodb_flush_log_at_trx_commit = 2
+innodb_log_file_size = 256M
+innodb_log_files_in_group = 2
+innodb_open_files = 400
+innodb_io_capacity = 400
+innodb_io_capacity_max = 2000
+innodb_read_io_threads = 4
+innodb_write_io_threads = 4
+innodb_thread_concurrency = 0
+innodb_flush_neighbors = 0
+innodb_stats_on_metadata = 0
+
+# Binary Logging (for replication and backup)
+log-bin = mysql-bin
+expire_logs_days = 7
+max_binlog_size = 100M
+binlog_format = ROW
+sync_binlog = 0
+
+# Slow Query Log
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 2
+log_queries_not_using_indexes = 1
+min_examined_row_limit = 1000
+
+# Error Log
+log_error = /var/log/mysql/error.log
+
+# General Log (disable in production for performance)
+general_log = 0
+
+# MyISAM Settings (for system tables)
+myisam_recover_options = BACKUP,FORCE
+
+# Table Settings
+table_open_cache = 4000
+table_definition_cache = 2000
+open_files_limit = 65535
+
+# Network Settings
+max_allowed_packet = 100M
+interactive_timeout = 300
+wait_timeout = 300
+net_read_timeout = 60
+net_write_timeout = 60
+
+# Security Settings
+local_infile = 0
+skip_name_resolve = 1
+
+# Gaming Platform Specific Optimizations
+# Optimize for frequent reads and writes of game scores
+innodb_buffer_pool_dump_at_shutdown = 1
+innodb_buffer_pool_load_at_startup = 1
+
+# Optimize for concurrent gaming sessions
+innodb_lock_wait_timeout = 50
+innodb_rollback_on_timeout = 1
+innodb_deadlock_detect = 1
+
+# Performance Schema (monitor with caution)
+performance_schema = ON
+performance_schema_max_table_instances = 500
+performance_schema_max_table_handles = 1000
+
+# Group Replication (if using MySQL clusters)
+# disabled_storage_engines = "MyISAM,BLACKHOLE,FEDERATED,ARCHIVE,MEMORY"
+
+[mysql]
+default-character-set = utf8mb4
+
+[client]
+default-character-set = utf8mb4
+port = 3306
+socket = /var/run/mysqld/mysqld.sock
+
+[mysqldump]
+quick
+quote-names
+max_allowed_packet = 100M
+
+[mysql_safe]
+socket = /var/run/mysqld/mysqld.sock
+nice = 0
+
+[mysqld_safe]
+log-error = /var/log/mysql/error.log
+pid-file = /var/run/mysqld/mysqld.pid 
