@@ -19,9 +19,9 @@ NC='\033[0m' # No Color
 APP_NAME="ahaz-backend"
 DEPLOY_PATH="/var/www/ahaz-backend"
 BACKUP_PATH="/var/backups/ahaz-backend"
-REPO_URL="https://github.com/your-username/ahaz-backend.git"  # Update this
+REPO_URL="https://github.com/nashgetch/rg_ahaz_be.git"  # Update this
 BRANCH="main"
-PHP_VERSION="8.2"
+PHP_VERSION="8.3"
 
 # Function to print colored output
 print_info() {

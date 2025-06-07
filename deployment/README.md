@@ -194,7 +194,7 @@ sudo ahaz-logs {nginx-access|nginx-errors|php-errors|laravel|mysql-slow|frontend
 #### Backend Not Responding
 ```bash
 # Check PHP-FPM status
-sudo systemctl status php8.2-fpm
+sudo systemctl status php8.3-fpm
 
 # Check Laravel logs
 sudo ahaz-maintenance logs
@@ -250,7 +250,7 @@ free -h
 mysql -u root -p -e "SHOW STATUS LIKE 'Innodb_buffer_pool%';"
 
 # Restart services if needed
-sudo systemctl restart mysql php8.2-fpm nginx
+sudo systemctl restart mysql php8.3-fpm nginx
 ```
 
 ## 🔒 Security Features
@@ -301,7 +301,7 @@ git pull origin main
 composer install --no-dev --optimize-autoloader
 php artisan migrate --force
 php artisan config:cache
-sudo systemctl restart php8.2-fpm
+sudo systemctl restart php8.3-fpm
 
 # Frontend
 cd /var/www/ahaz-frontend
