@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Models\Otp;
+use App\Models\OTP;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
@@ -47,7 +47,7 @@ class AuthController extends Controller
         $otpCode = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
 
         // Store OTP in database
-        Otp::create([
+        OTP::create([
             'phone' => $phone,
             'code' => Hash::make($otpCode),
             'type' => 'login',
@@ -96,7 +96,7 @@ class AuthController extends Controller
         $otpCode = $request->otp;
 
         // Find valid OTP
-        $otp = Otp::where('phone', $phone)
+        $otp = OTP::where('phone', $phone)
             ->where('expires_at', '>', now())
             ->whereNull('consumed_at')
             ->where('attempts', '<', 3)
