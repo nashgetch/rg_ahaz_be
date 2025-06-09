@@ -11,8 +11,6 @@ use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\CodeBreakerController;
 use App\Http\Controllers\Api\WordValidationController;
 use App\Http\Controllers\Api\PlayerStatsController;
-use App\Http\Controllers\Api\MinesController;
-use App\Http\Controllers\Api\SumChaserController;
 
 /*
 |--------------------------------------------------------------------------
@@ -57,19 +55,6 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/profile/username', [ProfileController::class, 'updateUsername']);
     Route::post('/profile/avatar', [ProfileController::class, 'updateAvatar']);
     Route::post('/profile/check-username', [ProfileController::class, 'checkUsername']);
-    
-    // Mines specific routes (must come before generic game routes)
-    Route::post('/games/mines/start', [MinesController::class, 'start']);
-    Route::post('/games/mines/{round}/reveal', [MinesController::class, 'reveal']);
-    Route::post('/games/mines/{round}/cashout', [MinesController::class, 'cashOut']);
-    Route::post('/games/mines/{round}/flag', [MinesController::class, 'useFlag']);
-    Route::get('/games/mines/history', [MinesController::class, 'history']);
-    
-    // Sum Chaser specific routes
-    Route::post('/games/sum-chaser/start', [SumChaserController::class, 'start']);
-    Route::post('/games/sum-chaser/{round}/predict', [SumChaserController::class, 'predict']);
-    Route::post('/games/sum-chaser/{round}/cashout', [SumChaserController::class, 'cashOut']);
-    Route::get('/games/sum-chaser/history', [SumChaserController::class, 'history']);
     
     // Game management
     Route::post('/games/{game}/start', [GameController::class, 'startRound']);
@@ -119,4 +104,4 @@ Route::post('/debug/upload', function (Request $request) {
             'method' => $request->method()
         ]
     ]);
-});
+}); 

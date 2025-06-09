@@ -100,6 +100,20 @@ return [
             'categories' => ['ethiopia', 'africa', 'world'],
             'enabled' => true,
         ],
+        'mines' => [
+            'title' => 'Mines',
+            'description' => 'Risk-reward game: reveal safe tiles to increase multiplier, avoid bombs',
+            'token_cost' => 1,
+            'max_score_reward' => 2200, // 22x multiplier * 100
+            'grid_size' => 5,
+            'total_tiles' => 25,
+            'bomb_count' => 3,
+            'flag_cost' => 0.5,
+            'base_multiplier' => 1.2,
+            'multiplier_growth' => 1.2,
+            'max_safe_tiles' => 22, // 25 - 3 bombs
+            'enabled' => true,
+        ],
     ],
 
     /*

@@ -569,22 +569,60 @@ class HistoricalLeaderboardService
             'leaderboards:total_players'
         ];
 
+        $cacheStore = \Cache::getStore();
+        $isRedisCache = method_exists($cacheStore, 'getRedis');
+
         foreach ($patterns as $pattern) {
             if (str_contains($pattern, '*')) {
                 // Handle wildcard patterns
                 $prefix = str_replace('*', '', $pattern);
-                try {
-                    $keys = \Cache::getStore()->getRedis()->keys($prefix . '*');
-                    if (!empty($keys)) {
-                        \Cache::getStore()->getRedis()->del($keys);
+                
+                if ($isRedisCache) {
+                    try {
+                        $keys = $cacheStore->getRedis()->keys($prefix . '*');
+                        if (!empty($keys)) {
+                            $cacheStore->getRedis()->del($keys);
+                        }
+                    } catch (\Exception $e) {
+                        // Fallback to individual cache clearing
+                        \Log::warning('Failed to clear Redis cache pattern: ' . $pattern, ['error' => $e->getMessage()]);
+                        $this->clearCachePatternFallback($prefix);
                     }
-                } catch (\Exception $e) {
-                    // Fallback to individual cache clearing
-                    \Log::warning('Failed to clear cache pattern: ' . $pattern, ['error' => $e->getMessage()]);
+                } else {
+                    // For non-Redis cache stores, use fallback method
+                    $this->clearCachePatternFallback($prefix);
                 }
             } else {
                 \Cache::forget($pattern);
             }
+        }
+    }
+
+    /**
+     * Fallback method to clear cache patterns for non-Redis stores
+     */
+    private function clearCachePatternFallback(string $prefix): void
+    {
+        // For database/file cache stores, clear known cache keys manually
+        $commonSuffixes = [
+            'current', 'monthly', 'yearly', 'all_time',
+            'top_10', 'top_25', 'top_50', 'top_100',
+            'stats', 'count', 'summary'
+        ];
+
+        foreach ($commonSuffixes as $suffix) {
+            \Cache::forget($prefix . $suffix);
+        }
+
+        // Also try some common variations
+        for ($i = 1; $i <= 12; $i++) {
+            \Cache::forget($prefix . str_pad($i, 2, '0', STR_PAD_LEFT));
+        }
+
+        // Clear year variations (last 5 years)
+        $currentYear = now()->year;
+        for ($year = $currentYear - 4; $year <= $currentYear + 1; $year++) {
+            \Cache::forget($prefix . $year);
         }
     }
 } 
