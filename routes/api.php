@@ -13,6 +13,9 @@ use App\Http\Controllers\Api\WordValidationController;
 use App\Http\Controllers\Api\PlayerStatsController;
 use App\Http\Controllers\Api\MinesController;
 use App\Http\Controllers\Api\SumChaserController;
+use App\Http\Controllers\Api\MultiplayerController;
+use App\Http\Controllers\Api\MultiplayerCodeBreakerController;
+use App\Http\Controllers\Api\MultiplayerCrazyController;
 
 /*
 |--------------------------------------------------------------------------
@@ -70,6 +73,51 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/games/sum-chaser/{round}/predict', [SumChaserController::class, 'predict']);
     Route::post('/games/sum-chaser/{round}/cashout', [SumChaserController::class, 'cashOut']);
     Route::get('/games/sum-chaser/history', [SumChaserController::class, 'history']);
+
+    // Multiplayer routes
+    Route::prefix('multiplayer')->group(function () {
+        Route::get('/rooms', [MultiplayerController::class, 'index']);
+        Route::get('/my-active-room', [MultiplayerController::class, 'getMyActiveRoom']);
+        Route::post('/rooms', [MultiplayerController::class, 'create']);
+        Route::get('/rooms/{roomCode}', [MultiplayerController::class, 'show']);
+        Route::post('/rooms/{roomCode}/join', [MultiplayerController::class, 'join']);
+        Route::post('/rooms/{roomCode}/leave', [MultiplayerController::class, 'leave']);
+        Route::post('/rooms/{roomCode}/ready', [MultiplayerController::class, 'ready']);
+        Route::post('/rooms/{roomCode}/bet', [MultiplayerController::class, 'placeBet']);
+        Route::post('/rooms/{roomCode}/propose-bet', [MultiplayerController::class, 'proposeBet']);
+        Route::post('/rooms/{roomCode}/respond-bet', [MultiplayerController::class, 'respondToBetProposal']);
+        Route::post('/rooms/{roomCode}/start', [MultiplayerController::class, 'start']);
+        Route::post('/rooms/{roomCode}/progress', [MultiplayerController::class, 'updateProgress']);
+        Route::post('/rooms/{roomCode}/finish', [MultiplayerController::class, 'finish']);
+        Route::post('/rooms/{roomCode}/invite', [MultiplayerController::class, 'invite']);
+        Route::post('/rooms/{roomCode}/replay', [MultiplayerController::class, 'initiateReplay']);
+        Route::post('/rooms/{roomCode}/replay/respond', [MultiplayerController::class, 'respondToReplay']);
+        Route::get('/invitations', [MultiplayerController::class, 'invitations']);
+        Route::post('/invitations/{invitationId}/respond', [MultiplayerController::class, 'respondToInvitation']);
+        Route::get('/history', [MultiplayerController::class, 'history']);
+        
+        // Multiplayer CodeBreaker specific routes
+        Route::prefix('codebreaker')->group(function () {
+            Route::post('/rooms/{roomCode}/start', [MultiplayerCodeBreakerController::class, 'start']);
+            Route::post('/rooms/{roomCode}/guess', [MultiplayerCodeBreakerController::class, 'guess']);
+            Route::post('/rooms/{roomCode}/hint', [MultiplayerCodeBreakerController::class, 'hint']);
+            Route::post('/rooms/{roomCode}/forfeit', [MultiplayerCodeBreakerController::class, 'forfeit']);
+            Route::get('/rooms/{roomCode}/status', [MultiplayerCodeBreakerController::class, 'status']);
+        });
+
+        // Multiplayer Crazy card game specific routes
+        Route::prefix('crazy')->group(function () {
+                    Route::post('/rooms/{roomCode}/start', [MultiplayerCrazyController::class, 'start']);
+        Route::post('/rooms/{roomCode}/play-card', [MultiplayerCrazyController::class, 'playCard']);
+        Route::post('/rooms/{roomCode}/draw-card', [MultiplayerCrazyController::class, 'drawCard']);
+        Route::post('/rooms/{roomCode}/qeregn', [MultiplayerCrazyController::class, 'sayQeregn']);
+        Route::post('/rooms/{roomCode}/yelegnm', [MultiplayerCrazyController::class, 'sayYelegnm']);
+        Route::post('/rooms/{roomCode}/crazy', [MultiplayerCrazyController::class, 'sayCrazy']);
+        Route::post('/rooms/{roomCode}/face-penalty', [MultiplayerCrazyController::class, 'facePenalty']);
+        Route::post('/rooms/{roomCode}/replay', [MultiplayerCrazyController::class, 'initiateReplay']);
+        Route::get('/rooms/{roomCode}/status', [MultiplayerCrazyController::class, 'status']);
+        });
+    });
     
     // Game management
     Route::post('/games/{game}/start', [GameController::class, 'startRound']);

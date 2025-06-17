@@ -15,7 +15,7 @@ return [
 
     'default_token_cost' => env('GAME_DEFAULT_TOKEN_COST', 10),
     'winner_token_reward' => env('GAME_WINNER_TOKEN_REWARD', 50),
-    'daily_bonus_tokens' => env('GAME_DAILY_BONUS_TOKENS', 20),
+    'daily_bonus_tokens' => env('GAME_DAILY_BONUS_TOKENS', 10),
 
     'games' => [
         'word-grid-blitz' => [
@@ -26,6 +26,17 @@ return [
             'time_limit' => 180, // 3 minutes
             'grid_size' => 4,
             'min_word_length' => 3,
+            'enabled' => true,
+        ],
+        'crazy' => [
+            'title' => 'Crazy',
+            'description' => 'Ethiopian card game with special rules and penalties',
+            'token_cost' => 15,
+            'max_score_reward' => 150,
+            'max_players' => 8,
+            'min_players' => 2,
+            'cards_per_player' => 5,
+            'decks' => 2,
             'enabled' => true,
         ],
         'number-merge-2048' => [

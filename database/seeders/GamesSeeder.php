@@ -26,7 +26,10 @@ class GamesSeeder extends Seeder
                 'max_score_possible' => 10000,
                 'difficulty_level' => 'easy',
                 'estimated_duration_minutes' => 3,
-                'instructions' => 'Watch the pattern and repeat it. Each round adds one more step to remember.',
+                'instructions' => json_encode([
+                    'en' => 'Watch the pattern and repeat it. Each round adds one more step to remember.',
+                    'am' => 'ሥርዓቱን ተመልከት እና ድገመው። እያንዳንዱ ዙር አንድ ተጨማሪ እርምጃ ያስታውሳል።'
+                ]),
                 'is_active' => true,
                 'config' => json_encode([
                     'max_rounds' => 20,

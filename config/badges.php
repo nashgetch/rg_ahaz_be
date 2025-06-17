@@ -3,7 +3,7 @@
 return [
     'tiers' => [
         'DEMIGOD' => [
-            'label' => 'DemiGod',
+            'label' => 'Emperor',
             'icon' => 'demigod',
             'rank_from' => 1,
             'rank_to' => 1,

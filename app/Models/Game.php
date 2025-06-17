@@ -22,11 +22,13 @@ class Game extends Model
         'max_score_reward',
         'enabled',
         'play_count',
+        'instructions',
     ];
 
     protected $casts = [
         'config' => 'array',
         'enabled' => 'boolean',
+        'instructions' => 'array',
     ];
 
     /**
@@ -90,13 +92,25 @@ class Game extends Model
      */
     public function calculateReward(int $score): int
     {
-        $maxReward = $this->max_score_reward;
-        $maxPossibleScore = $this->getConfigValue('max_possible_score', 1000);
-        
-        // Calculate percentage-based reward
-        $percentage = min($score / $maxPossibleScore, 1.0);
-        
-        return (int) round($maxReward * $percentage);
+        // Get user's highest score for this game
+        $user = auth()->user();
+        $highestScore = $user->rounds()
+            ->where('game_id', $this->id)
+            ->whereNotNull('completed_at')
+            ->where('score', '<', $score) // Only get scores less than current score
+            ->max('score');
+
+        // Only reward tokens if this is a new high score
+        if ($highestScore === null) {
+            // First time playing, reward up to 5 tokens
+            return min(5, $score / 100);
+        } else if ($score > $highestScore) {
+            // Beat previous high score, reward up to 5 tokens
+            return min(5, $score / 100);
+        }
+
+        // No tokens if didn't beat high score
+        return 0;
     }
 
     /**

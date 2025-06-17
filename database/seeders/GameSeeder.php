@@ -152,6 +152,29 @@ class GameSeeder extends Seeder
                 'token_cost' => 8,
                 'max_score_reward' => 90,
                 'enabled' => true
+            ],
+            [
+                'slug' => 'crazy',
+                'title' => 'Crazy (Ethiopian Card Game)',
+                'description' => 'Traditional Ethiopian card game using two 52-card decks. Play strategically with special cards and penalties.',
+                'mechanic' => 'card',
+                'config' => [
+                    'decks' => 2,
+                    'cards_per_player' => 5,
+                    'max_players' => 8,
+                    'min_players' => 2,
+                    'special_cards' => ['2', '5', '7', '8', 'J', 'A♠'],
+                    'penalties' => [
+                        'wrong_card' => 2,
+                        'false_joker' => 5,
+                        'forgot_qeregn' => 2
+                    ],
+                    'direction' => 'counter_clockwise',
+                    'ethiopian_terms' => ['qeregn', 'yelegnm']
+                ],
+                'token_cost' => 15,
+                'max_score_reward' => 200,
+                'enabled' => true
             ]
         ];
 

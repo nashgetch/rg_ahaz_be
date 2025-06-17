@@ -513,7 +513,7 @@ class SumChaserController extends Controller
     private function calculateTokenReward(int $score): int
     {
         $game = Game::where('slug', 'sum-chaser')->first();
-        return min($score / 50, $game->max_score_reward ?? 10);
+        return min($score / 100, 5); // Cap at 5 tokens
     }
 
     /**

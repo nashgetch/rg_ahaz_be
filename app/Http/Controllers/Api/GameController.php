@@ -34,7 +34,10 @@ class GameController extends Controller
                 'is_multiplayer' => $game->getConfigValue('is_multiplayer', false),
                 'icon' => $game->getConfigValue('icon', '🎮'),
                 'thumbnail' => $game->getConfigValue('thumbnail', '/images/games/default.png'),
-                'instructions' => $game->getConfigValue('instructions', ''),
+                'instructions' => $game->instructions ?? [
+                    'en' => $game->getConfigValue('instructions', ''),
+                    'am' => ''
+                ],
                 'settings' => $game->config
             ];
         });
@@ -55,7 +58,10 @@ class GameController extends Controller
             'name' => $game->title,
             'slug' => $game->slug,
             'description' => $game->description,
-            'instructions' => $game->getConfigValue('instructions', ''),
+            'instructions' => $game->instructions ?? [
+                'en' => $game->getConfigValue('instructions', ''),
+                'am' => ''
+            ],
             'category' => $game->mechanic,
             'difficulty' => $game->getConfigValue('difficulty', 'medium'),
             'cost_tokens' => $game->token_cost,

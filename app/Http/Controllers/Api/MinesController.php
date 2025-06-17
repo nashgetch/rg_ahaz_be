@@ -653,7 +653,7 @@ class MinesController extends Controller
     private function calculateTokenReward(int $score): int
     {
         $game = Game::where('slug', 'mines')->first();
-        return min($score / 100, $game->max_score_reward);
+        return min($score / 100, 5); // Cap at 5 tokens
     }
 
     /**
