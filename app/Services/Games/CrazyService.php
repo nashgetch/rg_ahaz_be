@@ -386,9 +386,9 @@ class CrazyService
      */
     public function canChangeSuit(array $gameState, int $playerIndex): bool
     {
-        // If this is the player's last card, they can't change suit (auto-win)
-        if (count($gameState['players'][$playerIndex]['hand']) === 1) {
-            \Log::info('Suit change blocked - last card auto-win', ['player_index' => $playerIndex]);
+        // If player has already won (0 cards remaining), suit change is irrelevant
+        if (count($gameState['players'][$playerIndex]['hand']) === 0) {
+            \Log::info('Suit change blocked - player has already won', ['player_index' => $playerIndex]);
             return false;
         }
         
