@@ -1512,6 +1512,10 @@ class MultiplayerCrazyController extends Controller
             $gameState['winner'] = $playerIndex;
             $gameState['winner_name'] = $gameState['players'][$playerIndex]['username'];
             
+            // Track winning card(s) for display in modal
+            $gameState['winning_cards'] = [$actualCard];
+            $gameState['winning_card_count'] = 1;
+            
             // For 8/J as last card, set suit to card's own suit (no selection needed)
             if (in_array($actualCard['number'], ['8', 'J'])) {
                 $gameState['current_suit'] = $actualCard['suit'];
@@ -1521,6 +1525,12 @@ class MultiplayerCrazyController extends Controller
             $effects = $this->crazyService->isSpecialCard($actualCard);
             $wonWithPenalty = in_array('penalty_2', $effects) || in_array('penalty_5', $effects);
             $message = $wonWithPenalty ? 'Game won with penalty card! Next player still faces penalty.' : 'Game won!';
+            
+            \Log::info('Game won with single card', [
+                'winner' => $gameState['winner_name'],
+                'winning_card' => $actualCard['number'] . $actualCard['suit'],
+                'penalty_card' => $wonWithPenalty
+            ]);
             
             return [
                 'success' => true,
@@ -1645,10 +1655,21 @@ class MultiplayerCrazyController extends Controller
             $gameState['winner'] = $playerIndex;
             $gameState['winner_name'] = $gameState['players'][$playerIndex]['username'];
             
+            // Track winning card(s) for display in modal
+            $gameState['winning_cards'] = $cardsToPlay;
+            $gameState['winning_card_count'] = count($cardsToPlay);
+            
             // Special message if won with penalty card
             $effects = $this->crazyService->isSpecialCard($lastCard);
             $wonWithPenalty = in_array('penalty_2', $effects) || in_array('penalty_5', $effects);
             $message = $wonWithPenalty ? 'Game won with penalty card! Next player still faces penalty.' : 'Game won!';
+            
+            \Log::info('Game won with multiple cards', [
+                'winner' => $gameState['winner_name'],
+                'winning_cards' => array_map(function($c) { return $c['number'] . $c['suit']; }, $cardsToPlay),
+                'card_count' => count($cardsToPlay),
+                'penalty_card' => $wonWithPenalty
+            ]);
             
             return [
                 'success' => true,
