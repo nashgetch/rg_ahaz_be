@@ -1225,19 +1225,57 @@ class MultiplayerCrazyController extends Controller
                     // to ensure its penalty is applied correctly. Only handle 2s here for simple countering.
                     
                     if ($actualCard['number'] === 'A' && $actualCard['suit'] === 'spades') {
-                        // ACE OF SPADES: Reset penalty chain and let normal logic handle it
-                        // This ensures A♠ ALWAYS applies its 5-card penalty regardless of circumstances
-                        $gameState['penalty_chain'] = 0;
-                        $gameState['penalty_target'] = null;
+                        // ACE OF SPADES: ADD to penalty chain (propagate penalty) and let normal logic handle it
+                        // This ensures A♠ ALWAYS adds its 5-card penalty on top of existing penalties
+                        $oldPenaltyChain = $gameState['penalty_chain'];
+                        $gameState['penalty_chain'] += $this->crazyService->getPenaltyChainValue($actualCard);
+                        $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
+                            $playerIndex, count($gameState['players']), !$gameState['direction']
+                        );
                         
-                        \Log::info('Ace of Spades detected - resetting penalty chain to process through normal logic', [
+                        // Remove card and add to discard pile
+                        $gameState['players'][$playerIndex]['hand'] = array_filter(
+                            $gameState['players'][$playerIndex]['hand'],
+                            function($card) use ($actualCard) {
+                                return $card['id'] !== $actualCard['id'];
+                            }
+                        );
+                        $gameState['players'][$playerIndex]['hand'] = array_values($gameState['players'][$playerIndex]['hand']);
+                        $gameState['discard_pile'][] = $actualCard;
+                        
+                        // Update current suit to the penalty card's suit
+                        $gameState['current_suit'] = $actualCard['suit'];
+                        
+                        \Log::info('Ace of Spades penalty propagated', [
                             'player_index' => $playerIndex,
-                            'old_penalty_chain' => $gameState['penalty_chain'],
-                            'will_be_processed_normally' => true
+                            'old_penalty_chain' => $oldPenaltyChain,
+                            'new_penalty_chain' => $gameState['penalty_chain'],
+                            'penalty_added' => $this->crazyService->getPenaltyChainValue($actualCard),
+                            'penalty_target' => $gameState['penalty_target'],
+                            'target_player' => $gameState['players'][$gameState['penalty_target']]['username']
                         ]);
                         
-                        // FALL THROUGH to normal card processing logic
-                        // Do NOT return early - let processSpecialCardEffects handle A♠
+                        // Check for win condition
+                        if (empty($gameState['players'][$playerIndex]['hand'])) {
+                            $gameState['phase'] = 'finished';
+                            $gameState['winner'] = $playerIndex;
+                            $gameState['winner_name'] = $gameState['players'][$playerIndex]['username'];
+                            
+                            return [
+                                'success' => true,
+                                'message' => 'Game won with penalty card! Next player still faces penalty.',
+                                'game_state' => $gameState
+                            ];
+                        }
+                        
+                        // Move to next player
+                        $gameState['current_player'] = $gameState['penalty_target'];
+                        
+                        return [
+                            'success' => true,
+                            'message' => 'Ace of Spades penalty propagated (+' . $this->crazyService->getPenaltyChainValue($actualCard) . '). Total penalty: ' . $gameState['penalty_chain'],
+                            'game_state' => $gameState
+                        ];
                     } else {
                         // Regular penalty card (2) - handle normally
                         $gameState['penalty_chain'] += $this->crazyService->getPenaltyChainValue($actualCard);
@@ -1511,7 +1549,19 @@ class MultiplayerCrazyController extends Controller
         // Increment turn count for suit change tracking
         $gameState['turn_count'] = ($gameState['turn_count'] ?? 0) + 1;
         
-        // Note: cards_played_since tracking removed - immediate next player rule is permanent
+        // CRITICAL: Increment cards_played_since counter for suit change tracking
+        // This ensures that suit change restrictions are properly lifted after cards are played
+        if (isset($gameState['last_suit_change'])) {
+            $gameState['last_suit_change']['cards_played_since']++;
+            
+            \Log::info('Incremented cards_played_since for suit change tracking (single card play)', [
+                'player_index' => $playerIndex,
+                'player_name' => $gameState['players'][$playerIndex]['username'],
+                'card_played' => $actualCard['number'] . $actualCard['suit'],
+                'cards_played_since' => $gameState['last_suit_change']['cards_played_since'],
+                'change_type' => $gameState['last_suit_change']['change_type'] ?? 'unknown'
+            ]);
+        }
 
         // Turn advancement is handled by processSpecialCardEffects for all cards
         // No additional turn advancement needed here
@@ -1610,7 +1660,18 @@ class MultiplayerCrazyController extends Controller
         // Increment turn count for suit change tracking
         $gameState['turn_count'] = ($gameState['turn_count'] ?? 0) + 1;
         
-        // Note: cards_played_since tracking removed - immediate next player rule is permanent
+        // CRITICAL: Increment cards_played_since counter for suit change tracking
+        // This ensures that suit change restrictions are properly lifted after cards are played
+        if (isset($gameState['last_suit_change'])) {
+            $gameState['last_suit_change']['cards_played_since']++;
+            
+            \Log::info('Incremented cards_played_since for suit change tracking (multi-card play)', [
+                'player_index' => $playerIndex,
+                'cards_played_count' => count($cardsToPlay),
+                'cards_played_since' => $gameState['last_suit_change']['cards_played_since'],
+                'change_type' => $gameState['last_suit_change']['change_type'] ?? 'unknown'
+            ]);
+        }
 
         return [
             'success' => true,
@@ -1783,9 +1844,10 @@ class MultiplayerCrazyController extends Controller
                             'timestamp' => now()->toISOString()
                         ];
                     } else {
-                        // Three or more players: reverse direction and go to previous player
+                        // Three or more players: reverse direction and go to next player in NEW direction
+                        // CRITICAL FIX: Use !$gameState['direction'] to get next player in the newly reversed direction
                         $gameState['current_player'] = $this->crazyService->getNextPlayer(
-                            $playerIndex, $playerCount, $gameState['direction']
+                            $playerIndex, $playerCount, !$gameState['direction']
                         );
                         
                         $playerName = $gameState['players'][$playerIndex]['username'];
@@ -1879,6 +1941,18 @@ class MultiplayerCrazyController extends Controller
             $gameState['current_player'] = $this->crazyService->getNextPlayer(
                 $playerIndex, $playerCount, !$gameState['direction']
             );
+        }
+
+        // CRITICAL: Increment cards_played_since counter for suit change tracking
+        // This ensures that suit change restrictions are properly lifted after cards are played
+        if (isset($gameState['last_suit_change'])) {
+            $gameState['last_suit_change']['cards_played_since']++;
+            
+            \Log::info('Incremented cards_played_since for suit change tracking', [
+                'player_index' => $playerIndex,
+                'cards_played_since' => $gameState['last_suit_change']['cards_played_since'],
+                'change_type' => $gameState['last_suit_change']['change_type'] ?? 'unknown'
+            ]);
         }
 
         return $gameState;
