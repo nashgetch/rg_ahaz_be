@@ -545,6 +545,36 @@ class MultiplayerCrazyController extends Controller
         $gameState['penalty_chain'] = 0;
         $gameState['penalty_target'] = null;
         
+        // CRITICAL: Clear suit change restriction when blocked player faces penalty
+        // Rule: If the immediate next player after an 8/J suit change faces penalty,
+        // the suit change restriction should be lifted for subsequent players
+        if (isset($gameState['last_suit_change'])) {
+            $lastChange = $gameState['last_suit_change'];
+            $changeType = $lastChange['change_type'] ?? 'unknown';
+            
+            // Only check this rule if the previous change was caused by 8/J
+            if ($changeType === '8_or_J' || $changeType === 'unknown') {
+                $playerCount = count($gameState['players']);
+                $nextPlayerAfterSuitChange = $this->crazyService->getNextPlayer(
+                    $lastChange['player_index'], 
+                    $playerCount, 
+                    !$gameState['direction']
+                );
+                
+                // If the penalized player is the one who was blocked from changing suits, clear the restriction
+                if ($playerIndex === $nextPlayerAfterSuitChange) {
+                    unset($gameState['last_suit_change']);
+                    \Log::info('Suit change restriction cleared - blocked player faced penalty', [
+                        'player_index' => $playerIndex,
+                        'player_name' => $gameState['players'][$playerIndex]['username'],
+                        'previous_suit_changer' => $lastChange['player_index'],
+                        'penalty_count' => $penaltyCount,
+                        'rule' => 'When immediate next player after 8/J suit change faces penalty, restriction is lifted'
+                    ]);
+                }
+            }
+        }
+        
         // DON'T move to next player - let them continue playing until turn ends naturally
         
         $room->update(['game_state' => $gameState]);
@@ -620,6 +650,35 @@ class MultiplayerCrazyController extends Controller
                 'success' => false,
                 'message' => 'You must draw a card before passing your turn'
             ], 400);
+        }
+
+        // CRITICAL: Clear suit change restriction when blocked player passes turn
+        // Rule: If the immediate next player after an 8/J suit change passes their turn,
+        // the suit change restriction should be lifted for subsequent players
+        if (isset($gameState['last_suit_change'])) {
+            $lastChange = $gameState['last_suit_change'];
+            $changeType = $lastChange['change_type'] ?? 'unknown';
+            
+            // Only check this rule if the previous change was caused by 8/J
+            if ($changeType === '8_or_J' || $changeType === 'unknown') {
+                $playerCount = count($gameState['players']);
+                $nextPlayerAfterSuitChange = $this->crazyService->getNextPlayer(
+                    $lastChange['player_index'], 
+                    $playerCount, 
+                    !$gameState['direction']
+                );
+                
+                // If the passing player is the one who was blocked from changing suits, clear the restriction
+                if ($playerIndex === $nextPlayerAfterSuitChange) {
+                    unset($gameState['last_suit_change']);
+                    \Log::info('Suit change restriction cleared - blocked player passed turn', [
+                        'player_index' => $playerIndex,
+                        'player_name' => $gameState['players'][$playerIndex]['username'],
+                        'previous_suit_changer' => $lastChange['player_index'],
+                        'rule' => 'When immediate next player after 8/J suit change passes turn, restriction is lifted'
+                    ]);
+                }
+            }
         }
 
         // Reset the has_drawn flag and move to next player
@@ -1343,6 +1402,26 @@ class MultiplayerCrazyController extends Controller
         // Add to discard pile
         $gameState['discard_pile'][] = $actualCard;
 
+        // CRITICAL: Clear suit change restriction when non-8/J card is successfully played
+        // Rule: After any successful non-8/J card play following a suit change, the 8/J restriction should be lifted
+        // For 8/J cards, we handle restriction clearing in processSpecialCardEffects after checking if change is allowed
+        if (isset($gameState['last_suit_change']) && !in_array($actualCard['number'], ['8', 'J'])) {
+            $lastChange = $gameState['last_suit_change'];
+            $changeType = $lastChange['change_type'] ?? 'unknown';
+            
+            // Only clear if the previous change was caused by 8/J (preserve normal card suit changes)
+            if ($changeType === '8_or_J' || $changeType === 'unknown') {
+                unset($gameState['last_suit_change']);
+                \Log::info('Suit change restriction cleared - non-8/J card successfully played after 8/J suit change', [
+                    'player_index' => $playerIndex,
+                    'player_name' => $gameState['players'][$playerIndex]['username'],
+                    'card_played' => $actualCard['number'] . $actualCard['suit'],
+                    'previous_suit_changer' => $lastChange['player_index'],
+                    'rule' => 'Any successful non-8/J card play after 8/J suit change lifts the restriction'
+                ]);
+            }
+        }
+
         // CRITICAL: Check if this is Ace of Spades before processing
         if ($actualCard['number'] === 'A' && $actualCard['suit'] === 'spades') {
             \Log::info('CRITICAL: Ace of Spades detected in main flow', [
@@ -1481,6 +1560,28 @@ class MultiplayerCrazyController extends Controller
             $gameState['discard_pile'][] = $card;
         }
 
+        // CRITICAL: Clear suit change restriction when non-8/J cards are successfully played
+        // Rule: After any successful non-8/J card play following a suit change, the 8/J restriction should be lifted
+        // For 8/J cards, we handle restriction clearing in processSpecialCardEffects after checking if change is allowed
+        $lastCard = end($cardsToPlay);
+        if (isset($gameState['last_suit_change']) && !in_array($lastCard['number'], ['8', 'J'])) {
+            $lastChange = $gameState['last_suit_change'];
+            $changeType = $lastChange['change_type'] ?? 'unknown';
+            
+            // Only clear if the previous change was caused by 8/J (preserve normal card suit changes)
+            if ($changeType === '8_or_J' || $changeType === 'unknown') {
+                unset($gameState['last_suit_change']);
+                \Log::info('Suit change restriction cleared - non-8/J multiple cards successfully played after 8/J suit change', [
+                    'player_index' => $playerIndex,
+                    'player_name' => $gameState['players'][$playerIndex]['username'],
+                    'cards_played_count' => count($cardsToPlay),
+                    'cards_played' => array_map(function($c) { return $c['number'] . $c['suit']; }, $cardsToPlay),
+                    'previous_suit_changer' => $lastChange['player_index'],
+                    'rule' => 'Any successful non-8/J card play after 8/J suit change lifts the restriction'
+                ]);
+            }
+        }
+
         // Reset has_drawn flag since player played cards
         $gameState['players'][$playerIndex]['has_drawn'] = false;
         
@@ -1577,9 +1678,9 @@ class MultiplayerCrazyController extends Controller
                                 'change_type' => '8_or_J' // Track that this was caused by 8/J
                             ];
                             
-                            \Log::info('Suit changed due to 8/J card', [
+                            \Log::info('Suit changed due to 8/J card with selected suit', [
                                 'player_index' => $playerIndex,
-                                'old_suit' => $gameState['current_suit'] ?? 'none',
+                                'old_suit' => $originalSuit,
                                 'new_suit' => $newSuit,
                                 'card_played' => $card['number'] . $card['suit'],
                                 'change_type' => '8_or_J',
@@ -1587,35 +1688,70 @@ class MultiplayerCrazyController extends Controller
                             ]);
                             
                             $suitChangeOccurred = true;
-                            
-                            \Log::info('Suit changed successfully', [
-                                'player_index' => $playerIndex,
-                                'old_suit' => $originalSuit,
-                                'new_suit' => $newSuit,
-                                'card_played' => $card['number'] . $card['suit']
-                            ]);
                         } else {
                             // No valid suit selected (or null for "keep current"), use card's suit as default
+                            // This happens when player is allowed to change suit but didn't select one
                             $gameState['current_suit'] = $card['suit'];
-                            $suitChangeOccurred = true;
+                            $gameState['last_suit_change'] = [
+                                'player_index' => $playerIndex,
+                                'turn_count' => $gameState['turn_count'] ?? 0,
+                                'cards_played_since' => 0,
+                                'change_type' => '8_or_J' // Track that this was caused by 8/J
+                            ];
                             
                             \Log::info('No suit selected, defaulting to card suit', [
                                 'player_index' => $playerIndex,
-                                'card_suit' => $card['suit'],
-                                'card_played' => $card['number'] . $card['suit']
+                                'old_suit' => $originalSuit,
+                                'new_suit' => $card['suit'],
+                                'card_played' => $card['number'] . $card['suit'],
+                                'change_type' => '8_or_J',
+                                'rule' => 'Default suit change when allowed but no selection made'
                             ]);
+                            
+                            $suitChangeOccurred = true;
                         }
                     } else {
                         // CRITICAL: When suit change is blocked, current suit must remain unchanged!
                         // Do NOT set current_suit here - leave it as is
                         $suitChangeOccurred = false;
                         
-                        \Log::info('Suit change blocked - current suit remains unchanged', [
+                        // IMPORTANT: When blocked player attempts 8/J suit change, clear the restriction
+                        // This allows subsequent players to change suits with their 8/J cards
+                        if (isset($gameState['last_suit_change'])) {
+                            $lastChange = $gameState['last_suit_change'];
+                            $changeType = $lastChange['change_type'] ?? 'unknown';
+                            
+                            // Only clear if this was a blocked attempt after an 8/J suit change
+                            if ($changeType === '8_or_J' || $changeType === 'unknown') {
+                                $playerCount = count($gameState['players']);
+                                $nextPlayerAfterSuitChange = $this->crazyService->getNextPlayer(
+                                    $lastChange['player_index'], 
+                                    $playerCount, 
+                                    !$gameState['direction']
+                                );
+                                
+                                // If the blocked player attempted to change suits, clear restriction for others
+                                if ($playerIndex === $nextPlayerAfterSuitChange) {
+                                    unset($gameState['last_suit_change']);
+                                    \Log::info('Suit change restriction cleared - blocked player attempted 8/J suit change', [
+                                        'player_index' => $playerIndex,
+                                        'player_name' => $gameState['players'][$playerIndex]['username'],
+                                        'card_played' => $card['number'] . $card['suit'],
+                                        'previous_suit_changer' => $lastChange['player_index'],
+                                        'rule' => 'When blocked player attempts 8/J suit change, restriction is lifted for subsequent players'
+                                    ]);
+                                }
+                            }
+                        }
+                        
+                        \Log::info('8/J suit change blocked - current suit remains unchanged', [
                             'player_index' => $playerIndex,
+                            'player_name' => $gameState['players'][$playerIndex]['username'],
                             'current_suit_stays' => $gameState['current_suit'],
                             'card_played' => $card['number'] . $card['suit'],
-                            'attempted_new_suit' => $newSuit,
-                            'suit_change_occurred' => false
+                            'attempted_new_suit' => $newSuit ?? 'none',
+                            'suit_change_occurred' => false,
+                            'rule' => 'Immediate next player after 8/J suit change cannot change suits'
                         ]);
                     }
                     
