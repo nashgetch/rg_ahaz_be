@@ -7,6 +7,13 @@ use App\Models\MultiplayerRoom;
 use App\Models\MultiplayerParticipant;
 use App\Services\Games\CrazyService;
 use App\Services\StrictBettingService;
+use App\Events\CrazyGameUpdated;
+use App\Events\MultiplayerRoomUpdated;
+use App\Events\TurnAdvanced;
+use App\Events\CardDropped;
+use App\Events\ShapeChanged;
+use App\Events\PenaltyApplied;
+use App\Events\QeregnAnnounced;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -230,6 +237,54 @@ class MultiplayerCrazyController extends Controller
         // Check for game completion
         $this->checkGameCompletion($room);
 
+        // Broadcast specific events for card play
+        if (count($cardsToPlay) === 1) {
+            \Log::info('Broadcasting CardDropped event', [
+                'room_code' => $room->room_code,
+                'player_id' => Auth::id(),
+                'card' => $cardsToPlay[0],
+                'new_suit' => $newSuit
+            ]);
+            event(new CardDropped($room->room_code, Auth::id(), $cardsToPlay[0], $newSuit));
+        }
+
+        // Broadcast turn advancement if it changed
+        if (isset($result['turn_advanced']) && $result['turn_advanced']) {
+            \Log::info('Broadcasting TurnAdvanced event', [
+                'room_code' => $room->room_code,
+                'next_player' => $gameState['current_player'],
+                'direction' => !$gameState['direction']
+            ]);
+            event(new TurnAdvanced($room->room_code, $gameState['current_player'], !$gameState['direction']));
+        }
+
+        // Broadcast shape change if suit was changed
+        if ($newSuit && $newSuit !== ($gameState['current_suit'] ?? null)) {
+            \Log::info('Broadcasting ShapeChanged event', [
+                'room_code' => $room->room_code,
+                'new_suit' => $newSuit
+            ]);
+            event(new ShapeChanged($room->room_code, $newSuit));
+        }
+
+        // Broadcast general game update via WebSocket to trigger frontend refresh
+        \Log::info('Broadcasting CrazyGameUpdated (card_played) event', [
+            'room_code' => $room->room_code,
+            'action' => 'card_played',
+            'player_id' => Auth::id(),
+            'cards_played' => count($cardsToPlay),
+            'turn_advanced' => isset($result['turn_advanced']) ? $result['turn_advanced'] : false
+        ]);
+        
+        broadcast(new CrazyGameUpdated(
+            $room->room_code,
+            [], // Don't send full game state - let frontend fetch it
+            'card_played',
+            Auth::id(),
+            null,
+            $gameState['last_notification'] ?? null
+        ));
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -319,6 +374,23 @@ class MultiplayerCrazyController extends Controller
             'last_action_at' => now()->toISOString()
         ]);
 
+        // Broadcast game update via WebSocket with player-specific game state
+        \Log::info('Broadcasting CrazyGameUpdated (card_drawn) event', [
+            'room_code' => $room->room_code,
+            'action' => 'card_drawn',
+            'player_id' => Auth::id()
+        ]);
+        
+        // Create a simplified broadcast that triggers frontend state refresh
+        broadcast(new CrazyGameUpdated(
+            $room->room_code,
+            [], // Don't send full game state - let frontend fetch it
+            'card_drawn',
+            Auth::id(),
+            null, // Don't send leaderboard - let frontend fetch it
+            null
+        ));
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -392,6 +464,29 @@ class MultiplayerCrazyController extends Controller
         ];
         
         $room->update(['game_state' => $gameState]);
+
+        // Broadcast specific event for Qeregn announcement
+        \Log::info('Broadcasting QeregnAnnounced event', [
+            'room_code' => $room->room_code,
+            'player_id' => Auth::id()
+        ]);
+        event(new QeregnAnnounced($room->room_code, Auth::id()));
+
+        // Broadcast general game update via WebSocket to trigger frontend refresh
+        \Log::info('Broadcasting CrazyGameUpdated (qeregn_declared) event', [
+            'room_code' => $room->room_code,
+            'action' => 'qeregn_declared',
+            'player_id' => Auth::id()
+        ]);
+        
+        broadcast(new CrazyGameUpdated(
+            $room->room_code,
+            [], // Don't send full game state - let frontend fetch it
+            'qeregn_declared',
+            Auth::id(),
+            null,
+            $gameState['last_notification']
+        ));
 
         return response()->json([
             'success' => true,
@@ -484,6 +579,26 @@ class MultiplayerCrazyController extends Controller
         ];
 
         $room->update(['game_state' => $gameState]);
+
+        // Broadcast specific penalty event
+        event(new PenaltyApplied($room->room_code, $gameState['players'][$targetIndex]['user_id'], 2, 'crazy_call'));
+
+        // Broadcast general game update via WebSocket to trigger frontend refresh
+        \Log::info('Broadcasting CrazyGameUpdated (crazy_called) event', [
+            'room_code' => $room->room_code,
+            'action' => 'crazy_called',
+            'player_id' => Auth::id(),
+            'target_player' => $targetIndex
+        ]);
+        
+        broadcast(new CrazyGameUpdated(
+            $room->room_code,
+            [], // Don't send full game state - let frontend fetch it
+            'crazy_called',
+            Auth::id(),
+            null,
+            $gameState['last_notification']
+        ));
 
         return response()->json([
             'success' => true,
@@ -578,6 +693,22 @@ class MultiplayerCrazyController extends Controller
         // DON'T move to next player - let them continue playing until turn ends naturally
         
         $room->update(['game_state' => $gameState]);
+
+        // Broadcast game update via WebSocket to trigger frontend refresh
+        \Log::info('Broadcasting CrazyGameUpdated (penalty_faced) event', [
+            'room_code' => $room->room_code,
+            'action' => 'penalty_faced',
+            'player_id' => Auth::id(),
+            'penalty_count' => $penaltyCount
+        ]);
+        
+        broadcast(new CrazyGameUpdated(
+            $room->room_code,
+            [], // Don't send full game state - let frontend fetch it
+            'penalty_faced',
+            Auth::id(),
+            null
+        ));
 
         return response()->json([
             'success' => true,
@@ -690,6 +821,23 @@ class MultiplayerCrazyController extends Controller
         );
 
         $room->update(['game_state' => $gameState]);
+
+        // Broadcast game update via WebSocket to trigger frontend refresh
+        \Log::info('Broadcasting CrazyGameUpdated (turn_passed) event', [
+            'room_code' => $room->room_code,
+            'action' => 'turn_passed',
+            'player_id' => Auth::id(),
+            'new_current_player' => $gameState['current_player']
+        ]);
+        
+        broadcast(new CrazyGameUpdated(
+            $room->room_code,
+            [], // Don't send full game state - let frontend fetch it
+            'turn_passed',
+            Auth::id(),
+            null,
+            null
+        ));
 
         return response()->json([
             'success' => true,
@@ -1225,57 +1373,190 @@ class MultiplayerCrazyController extends Controller
                     // to ensure its penalty is applied correctly. Only handle 2s here for simple countering.
                     
                     if ($actualCard['number'] === 'A' && $actualCard['suit'] === 'spades') {
-                        // ACE OF SPADES: ADD to penalty chain (propagate penalty) and let normal logic handle it
-                        // This ensures A♠ ALWAYS adds its 5-card penalty on top of existing penalties
-                        $oldPenaltyChain = $gameState['penalty_chain'];
-                        $gameState['penalty_chain'] += $this->crazyService->getPenaltyChainValue($actualCard);
-                        $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
-                            $playerIndex, count($gameState['players']), !$gameState['direction']
-                        );
+                        // ACE OF SPADES: Can only propagate on spades cards (2♠ or A♠)
+                        $lastPenaltyCard = end($gameState['discard_pile']);
                         
-                        // Remove card and add to discard pile
-                        $gameState['players'][$playerIndex]['hand'] = array_filter(
-                            $gameState['players'][$playerIndex]['hand'],
-                            function($card) use ($actualCard) {
-                                return $card['id'] !== $actualCard['id'];
+                        // Check if the last penalty card is spades - only then can A♠ propagate
+                        if ($lastPenaltyCard['suit'] === 'spades') {
+                            // Valid A♠ propagation - add to penalty chain
+                            $oldPenaltyChain = $gameState['penalty_chain'];
+                            $gameState['penalty_chain'] += $this->crazyService->getPenaltyChainValue($actualCard);
+                            $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
+                                $playerIndex, count($gameState['players']), !$gameState['direction']
+                            );
+                            
+                            // Remove card and add to discard pile
+                            $gameState['players'][$playerIndex]['hand'] = array_filter(
+                                $gameState['players'][$playerIndex]['hand'],
+                                function($card) use ($actualCard) {
+                                    return $card['id'] !== $actualCard['id'];
+                                }
+                            );
+                            $gameState['players'][$playerIndex]['hand'] = array_values($gameState['players'][$playerIndex]['hand']);
+                            $gameState['discard_pile'][] = $actualCard;
+                            
+                            // Update current suit to spades
+                            $gameState['current_suit'] = $actualCard['suit'];
+                            
+                            \Log::info('Ace of Spades penalty propagated (valid - on spades card)', [
+                                'player_index' => $playerIndex,
+                                'old_penalty_chain' => $oldPenaltyChain,
+                                'new_penalty_chain' => $gameState['penalty_chain'],
+                                'penalty_added' => $this->crazyService->getPenaltyChainValue($actualCard),
+                                'penalty_target' => $gameState['penalty_target'],
+                                'target_player' => $gameState['players'][$gameState['penalty_target']]['username'],
+                                'last_penalty_card' => $lastPenaltyCard['number'] . $lastPenaltyCard['suit'],
+                                'rule' => 'A♠ can only propagate on spades cards'
+                            ]);
+                            
+                            // Check for win condition
+                            if (empty($gameState['players'][$playerIndex]['hand'])) {
+                                $gameState['phase'] = 'finished';
+                                $gameState['winner'] = $playerIndex;
+                                $gameState['winner_name'] = $gameState['players'][$playerIndex]['username'];
+                                
+                                return [
+                                    'success' => true,
+                                    'message' => 'Game won with penalty card! Next player still faces penalty.',
+                                    'game_state' => $gameState
+                                ];
                             }
-                        );
-                        $gameState['players'][$playerIndex]['hand'] = array_values($gameState['players'][$playerIndex]['hand']);
-                        $gameState['discard_pile'][] = $actualCard;
-                        
-                        // Update current suit to the penalty card's suit
-                        $gameState['current_suit'] = $actualCard['suit'];
-                        
-                        \Log::info('Ace of Spades penalty propagated', [
-                            'player_index' => $playerIndex,
-                            'old_penalty_chain' => $oldPenaltyChain,
-                            'new_penalty_chain' => $gameState['penalty_chain'],
-                            'penalty_added' => $this->crazyService->getPenaltyChainValue($actualCard),
-                            'penalty_target' => $gameState['penalty_target'],
-                            'target_player' => $gameState['players'][$gameState['penalty_target']]['username']
-                        ]);
-                        
-                        // Check for win condition
-                        if (empty($gameState['players'][$playerIndex]['hand'])) {
-                            $gameState['phase'] = 'finished';
-                            $gameState['winner'] = $playerIndex;
-                            $gameState['winner_name'] = $gameState['players'][$playerIndex]['username'];
+                            
+                            // Move to next player
+                            $gameState['current_player'] = $gameState['penalty_target'];
                             
                             return [
                                 'success' => true,
-                                'message' => 'Game won with penalty card! Next player still faces penalty.',
+                                'message' => 'Ace of Spades penalty propagated (+' . $this->crazyService->getPenaltyChainValue($actualCard) . '). Total penalty: ' . $gameState['penalty_chain'],
+                                'game_state' => $gameState
+                            ];
+                        } else {
+                            // Invalid A♠ play - played on non-spades penalty card, penalize the player
+                            \Log::info('Invalid Ace of Spades play - played on non-spades penalty card', [
+                                'player_index' => $playerIndex,
+                                'player_name' => $gameState['players'][$playerIndex]['username'],
+                                'last_penalty_card' => $lastPenaltyCard['number'] . $lastPenaltyCard['suit'],
+                                'attempted_card' => $actualCard['number'] . $actualCard['suit'],
+                                'rule' => 'A♠ can only be played on spades penalty cards (2♠ or A♠)'
+                            ]);
+                            
+                            // Refill deck if empty
+                            $this->refillDeckIfEmpty($gameState);
+                            
+                            // Penalize player for invalid A♠ play (same as invalid penalty counter)
+                            for ($i = 0; $i < 2; $i++) { // 2 cards for invalid penalty attempt
+                                if (!empty($gameState['deck'])) {
+                                    $gameState['players'][$playerIndex]['hand'][] = array_shift($gameState['deck']);
+                                }
+                            }
+                            
+                            $gameState['players'][$playerIndex]['mistakes']++;
+                            $gameState['players'][$playerIndex]['penalties'] += 2;
+                            
+                            return [
+                                'success' => false,
+                                'message' => 'Invalid Ace of Spades play. Drew 2 penalty cards. (A♠ can only be played on spades penalty cards, not ' . $lastPenaltyCard['number'] . $lastPenaltyCard['suit'] . ')',
                                 'game_state' => $gameState
                             ];
                         }
-                        
-                        // Move to next player
-                        $gameState['current_player'] = $gameState['penalty_target'];
-                        
-                        return [
-                            'success' => true,
-                            'message' => 'Ace of Spades penalty propagated (+' . $this->crazyService->getPenaltyChainValue($actualCard) . '). Total penalty: ' . $gameState['penalty_chain'],
-                            'game_state' => $gameState
-                        ];
+                    } elseif ($actualCard['number'] === '2' && $actualCard['suit'] === 'spades' && 
+                             !empty($gameState['discard_pile'])) {
+                        // 2 OF SPADES: Check if it's being played on Ace of Spades
+                        $lastPenaltyCard = end($gameState['discard_pile']);
+                        if ($lastPenaltyCard['number'] === 'A' && $lastPenaltyCard['suit'] === 'spades') {
+                            // 2♠ on A♠: Propagate the penalty to next player (same suit propagation)
+                            $oldPenaltyChain = $gameState['penalty_chain'];
+                            $gameState['penalty_chain'] += $this->crazyService->getPenaltyChainValue($actualCard);
+                            $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
+                                $playerIndex, count($gameState['players']), !$gameState['direction']
+                            );
+                            
+                            // Remove card and add to discard pile
+                            $gameState['players'][$playerIndex]['hand'] = array_filter(
+                                $gameState['players'][$playerIndex]['hand'],
+                                function($card) use ($actualCard) {
+                                    return $card['id'] !== $actualCard['id'];
+                                }
+                            );
+                            $gameState['players'][$playerIndex]['hand'] = array_values($gameState['players'][$playerIndex]['hand']);
+                            $gameState['discard_pile'][] = $actualCard;
+                            
+                            // Update current suit to the penalty card's suit (spades)
+                            $gameState['current_suit'] = $actualCard['suit'];
+                            
+                            \Log::info('2 of Spades on Ace of Spades penalty propagated', [
+                                'player_index' => $playerIndex,
+                                'old_penalty_chain' => $oldPenaltyChain,
+                                'new_penalty_chain' => $gameState['penalty_chain'],
+                                'penalty_added' => $this->crazyService->getPenaltyChainValue($actualCard),
+                                'penalty_target' => $gameState['penalty_target'],
+                                'target_player' => $gameState['players'][$gameState['penalty_target']]['username'],
+                                'rule' => '2♠ can propagate A♠ penalty due to same suit'
+                            ]);
+                            
+                            // Check for win condition
+                            if (empty($gameState['players'][$playerIndex]['hand'])) {
+                                $gameState['phase'] = 'finished';
+                                $gameState['winner'] = $playerIndex;
+                                $gameState['winner_name'] = $gameState['players'][$playerIndex]['username'];
+                                
+                                return [
+                                    'success' => true,
+                                    'message' => 'Game won with penalty card! Next player still faces penalty.',
+                                    'game_state' => $gameState
+                                ];
+                            }
+                            
+                            // Move to next player
+                            $gameState['current_player'] = $gameState['penalty_target'];
+                            
+                            return [
+                                'success' => true,
+                                'message' => '2 of Spades propagated Ace of Spades penalty (+' . $this->crazyService->getPenaltyChainValue($actualCard) . '). Total penalty: ' . $gameState['penalty_chain'],
+                                'game_state' => $gameState
+                            ];
+                        } else {
+                            // Regular 2♠ penalty (not on A♠)
+                            $gameState['penalty_chain'] += $this->crazyService->getPenaltyChainValue($actualCard);
+                            $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
+                                $playerIndex, count($gameState['players']), !$gameState['direction']
+                            );
+                            
+                            // Remove card and add to discard pile
+                            $gameState['players'][$playerIndex]['hand'] = array_filter(
+                                $gameState['players'][$playerIndex]['hand'],
+                                function($card) use ($actualCard) {
+                                    return $card['id'] !== $actualCard['id'];
+                                }
+                            );
+                            $gameState['players'][$playerIndex]['hand'] = array_values($gameState['players'][$playerIndex]['hand']);
+                            $gameState['discard_pile'][] = $actualCard;
+                            
+                            // Update current suit to the penalty card's suit
+                            $gameState['current_suit'] = $actualCard['suit'];
+                            
+                            // Check for win condition
+                            if (empty($gameState['players'][$playerIndex]['hand'])) {
+                                $gameState['phase'] = 'finished';
+                                $gameState['winner'] = $playerIndex;
+                                $gameState['winner_name'] = $gameState['players'][$playerIndex]['username'];
+                                
+                                return [
+                                    'success' => true,
+                                    'message' => 'Game won with penalty card! Next player still faces penalty.',
+                                    'game_state' => $gameState
+                                ];
+                            }
+                            
+                            // Move to next player
+                            $gameState['current_player'] = $gameState['penalty_target'];
+                            
+                            return [
+                                'success' => true,
+                                'message' => '2 of Spades penalty applied (+' . $this->crazyService->getPenaltyChainValue($actualCard) . '). Total penalty: ' . $gameState['penalty_chain'],
+                                'game_state' => $gameState
+                            ];
+                        }
                     } else {
                         // Regular penalty card (2) - handle normally
                         $gameState['penalty_chain'] += $this->crazyService->getPenaltyChainValue($actualCard);
@@ -1647,7 +1928,28 @@ class MultiplayerCrazyController extends Controller
         
         // Process effects of the last played card FIRST (including penalties)
         $lastCard = end($cardsToPlay);
-        $gameState = $this->processSpecialCardEffects($gameState, $lastCard, $playerIndex);
+        
+        // RULE FIX: In multiple card drops, ALL special effects should be skipped
+        // Special effects (penalties, turn effects) only apply for single card drops
+        $isMultipleCardDrop = count($cardsToPlay) > 1;
+        
+        if ($isMultipleCardDrop) {
+            $cardNumbers = array_map(function($card) { return $card['number']; }, $cardsToPlay);
+            $effects = $this->crazyService->isSpecialCard($lastCard);
+            $hasSpecialEffects = !empty(array_intersect($effects, ['penalty_2', 'penalty_5', 'reverse_direction', 'skip_next']));
+            
+            if ($hasSpecialEffects) {
+                \Log::info('Multiple card drop detected - skipping ALL special effects', [
+                    'player_index' => $playerIndex,
+                    'cards_played' => $cardNumbers,
+                    'last_card' => $lastCard['number'] . $lastCard['suit'],
+                    'effects_skipped' => array_intersect($effects, ['penalty_2', 'penalty_5', 'reverse_direction', 'skip_next']),
+                    'rule' => 'Penalty and turn effects only apply in single card drops'
+                ]);
+            }
+        }
+        
+        $gameState = $this->processSpecialCardEffects($gameState, $lastCard, $playerIndex, null, $isMultipleCardDrop);
 
         // Check for win condition AFTER processing special effects
         if (empty($gameState['players'][$playerIndex]['hand'])) {
@@ -1704,7 +2006,7 @@ class MultiplayerCrazyController extends Controller
     /**
      * Process special card effects
      */
-    private function processSpecialCardEffects(array $gameState, array $card, int $playerIndex, ?string $newSuit = null): array
+    private function processSpecialCardEffects(array $gameState, array $card, int $playerIndex, ?string $newSuit = null, bool $isMultipleCardDrop = false): array
     {
         $playerCount = count($gameState['players']);
         $cardNumber = $card['number'];
@@ -1719,30 +2021,52 @@ class MultiplayerCrazyController extends Controller
         foreach ($effects as $effect) {
             switch ($effect) {
                 case 'penalty_2':
-                    $gameState['penalty_chain'] += 2;
-                    $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
-                        $playerIndex, $playerCount, !$gameState['direction']
-                    );
-                    $gameState['current_player'] = $gameState['penalty_target'];
-                    $turnAdvanced = true;
+                    if ($isMultipleCardDrop) {
+                        // In multiple card drops, 2 should not apply penalty - only set suit
+                        $gameState['current_suit'] = $card['suit'];
+                        \Log::info('2 card penalty effect skipped in multiple drop - only suit changed', [
+                            'player_index' => $playerIndex,
+                            'card' => $card['number'] . $card['suit'],
+                            'new_suit' => $card['suit'],
+                            'rule' => 'Penalty effects for 2 only apply in single card drops'
+                        ]);
+                    } else {
+                        $gameState['penalty_chain'] += 2;
+                        $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
+                            $playerIndex, $playerCount, !$gameState['direction']
+                        );
+                        $gameState['current_player'] = $gameState['penalty_target'];
+                        $turnAdvanced = true;
+                    }
                     break;
 
                 case 'penalty_5':
-                    // Ace of Spades ALWAYS applies 5 card penalty under any circumstances
-                    $gameState['penalty_chain'] += 5;
-                    $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
-                        $playerIndex, $playerCount, !$gameState['direction']
-                    );
-                    $gameState['current_player'] = $gameState['penalty_target'];
-                    $turnAdvanced = true;
-                    
-                    // Log for debugging
-                    \Log::info('Ace of Spades penalty applied', [
-                        'player' => $gameState['players'][$playerIndex]['username'],
-                        'penalty_chain' => $gameState['penalty_chain'],
-                        'penalty_target' => $gameState['penalty_target'],
-                        'target_player' => $gameState['players'][$gameState['penalty_target']]['username']
-                    ]);
+                    if ($isMultipleCardDrop) {
+                        // In multiple card drops, Ace of Spades should not apply penalty - only set suit
+                        $gameState['current_suit'] = $card['suit'];
+                        \Log::info('Ace of Spades penalty effect skipped in multiple drop - only suit changed', [
+                            'player_index' => $playerIndex,
+                            'card' => $card['number'] . $card['suit'],
+                            'new_suit' => $card['suit'],
+                            'rule' => 'Penalty effects for Ace of Spades only apply in single card drops'
+                        ]);
+                    } else {
+                        // Ace of Spades ALWAYS applies 5 card penalty under any circumstances (when single drop)
+                        $gameState['penalty_chain'] += 5;
+                        $gameState['penalty_target'] = $this->crazyService->getNextPlayer(
+                            $playerIndex, $playerCount, !$gameState['direction']
+                        );
+                        $gameState['current_player'] = $gameState['penalty_target'];
+                        $turnAdvanced = true;
+                        
+                        // Log for debugging
+                        \Log::info('Ace of Spades penalty applied', [
+                            'player' => $gameState['players'][$playerIndex]['username'],
+                            'penalty_chain' => $gameState['penalty_chain'],
+                            'penalty_target' => $gameState['penalty_target'],
+                            'target_player' => $gameState['players'][$gameState['penalty_target']]['username']
+                        ]);
+                    }
                     break;
 
                 case 'change_suit':
@@ -1849,85 +2173,107 @@ class MultiplayerCrazyController extends Controller
                     break;
 
                 case 'reverse_direction':
-                    $gameState['direction'] = !$gameState['direction'];
-                    $newDirection = $gameState['direction'] ? 'clockwise' : 'counter-clockwise';
-                    $gameState['current_suit'] = $card['suit'];
-                    
-                    if ($playerCount === 2) {
-                        // Two players: 5 brings turn back to same player
-                        $gameState['current_player'] = $playerIndex;
-                        
-                        $playerName = $gameState['players'][$playerIndex]['username'];
-                        $gameState['last_notification'] = [
-                            'type' => 'turn_rotation',
-                            'message' => "{$playerName} played 5! Turn rotated back to {$playerName}.",
+                    if ($isMultipleCardDrop) {
+                        // In multiple card drops, 5 should not affect turns - only set suit
+                        $gameState['current_suit'] = $card['suit'];
+                        \Log::info('5 card effect skipped in multiple drop - only suit changed', [
                             'player_index' => $playerIndex,
-                            'timestamp' => now()->toISOString()
-                        ];
+                            'card' => $card['number'] . $card['suit'],
+                            'new_suit' => $card['suit'],
+                            'rule' => 'Turn effects for 5 only apply in single card drops'
+                        ]);
                     } else {
-                        // Three or more players: reverse direction and go to next player in NEW direction
-                        // CRITICAL FIX: Use !$gameState['direction'] to get next player in the newly reversed direction
-                        $gameState['current_player'] = $this->crazyService->getNextPlayer(
-                            $playerIndex, $playerCount, !$gameState['direction']
-                        );
+                        $gameState['direction'] = !$gameState['direction'];
+                        $newDirection = $gameState['direction'] ? 'clockwise' : 'counter-clockwise';
+                        $gameState['current_suit'] = $card['suit'];
                         
-                        $playerName = $gameState['players'][$playerIndex]['username'];
-                        $nextPlayerName = $gameState['players'][$gameState['current_player']]['username'];
-                        $gameState['last_notification'] = [
-                            'type' => 'direction_change',
-                            'message' => "{$playerName} played 5! Direction is now {$newDirection}, turn to {$nextPlayerName}.",
-                            'player_index' => $playerIndex,
-                            'direction' => $gameState['direction'],
-                            'timestamp' => now()->toISOString()
-                        ];
+                        if ($playerCount === 2) {
+                            // Two players: 5 brings turn back to same player
+                            $gameState['current_player'] = $playerIndex;
+                            
+                            $playerName = $gameState['players'][$playerIndex]['username'];
+                            $gameState['last_notification'] = [
+                                'type' => 'turn_rotation',
+                                'message' => "{$playerName} played 5! Turn rotated back to {$playerName}.",
+                                'player_index' => $playerIndex,
+                                'timestamp' => now()->toISOString()
+                            ];
+                        } else {
+                            // Three or more players: reverse direction and go to next player in NEW direction
+                            // CRITICAL FIX: Use !$gameState['direction'] to get next player in the newly reversed direction
+                            $gameState['current_player'] = $this->crazyService->getNextPlayer(
+                                $playerIndex, $playerCount, !$gameState['direction']
+                            );
+                            
+                            $playerName = $gameState['players'][$playerIndex]['username'];
+                            $nextPlayerName = $gameState['players'][$gameState['current_player']]['username'];
+                            $gameState['last_notification'] = [
+                                'type' => 'direction_change',
+                                'message' => "{$playerName} played 5! Direction is now {$newDirection}, turn to {$nextPlayerName}.",
+                                'player_index' => $playerIndex,
+                                'direction' => $gameState['direction'],
+                                'timestamp' => now()->toISOString()
+                            ];
+                        }
+                        $turnAdvanced = true;
                     }
-                    $turnAdvanced = true;
                     break;
 
                 case 'skip_next':
-                    if ($playerCount === 2) {
-                        // Two players: 7 brings turn back to same player
-                        $gameState['current_player'] = $playerIndex;
+                    if ($isMultipleCardDrop) {
+                        // In multiple card drops, 7 should not affect turns - only set suit
                         $gameState['current_suit'] = $card['suit'];
-                        
-                        $playerName = $gameState['players'][$playerIndex]['username'];
-                        $skippedPlayerName = $gameState['players'][$this->crazyService->getNextPlayer(
-                            $playerIndex, $playerCount, !$gameState['direction']
-                        )]['username'];
-                        
-                        $gameState['last_notification'] = [
-                            'type' => 'turn_skip',
-                            'message' => "{$playerName} played 7! Turn skipped for {$skippedPlayerName}. Turn back to {$playerName}.",
+                        \Log::info('7 card effect skipped in multiple drop - only suit changed', [
                             'player_index' => $playerIndex,
-                            'skipped_player' => $this->crazyService->getNextPlayer(
-                                $playerIndex, $playerCount, !$gameState['direction']
-                            ),
-                            'timestamp' => now()->toISOString()
-                        ];
+                            'card' => $card['number'] . $card['suit'],
+                            'new_suit' => $card['suit'],
+                            'rule' => 'Turn effects for 7 only apply in single card drops'
+                        ]);
                     } else {
-                        // Three or more players: skip next player
-                        $gameState['current_player'] = $this->crazyService->getNextPlayer(
-                            $playerIndex, $playerCount, !$gameState['direction'], 1
-                        );
-                        $gameState['current_suit'] = $card['suit'];
-                        
-                        $playerName = $gameState['players'][$playerIndex]['username'];
-                        $skippedPlayerName = $gameState['players'][$this->crazyService->getNextPlayer(
-                            $playerIndex, $playerCount, !$gameState['direction']
-                        )]['username'];
-                        $nextPlayerName = $gameState['players'][$gameState['current_player']]['username'];
-                        
-                        $gameState['last_notification'] = [
-                            'type' => 'turn_skip',
-                            'message' => "{$playerName} played 7! {$skippedPlayerName} is skipped, turn to {$nextPlayerName}.",
-                            'player_index' => $playerIndex,
-                            'skipped_player' => $this->crazyService->getNextPlayer(
+                        if ($playerCount === 2) {
+                            // Two players: 7 brings turn back to same player
+                            $gameState['current_player'] = $playerIndex;
+                            $gameState['current_suit'] = $card['suit'];
+                            
+                            $playerName = $gameState['players'][$playerIndex]['username'];
+                            $skippedPlayerName = $gameState['players'][$this->crazyService->getNextPlayer(
                                 $playerIndex, $playerCount, !$gameState['direction']
-                            ),
-                            'timestamp' => now()->toISOString()
-                        ];
+                            )]['username'];
+                            
+                            $gameState['last_notification'] = [
+                                'type' => 'turn_skip',
+                                'message' => "{$playerName} played 7! Turn skipped for {$skippedPlayerName}. Turn back to {$playerName}.",
+                                'player_index' => $playerIndex,
+                                'skipped_player' => $this->crazyService->getNextPlayer(
+                                    $playerIndex, $playerCount, !$gameState['direction']
+                                ),
+                                'timestamp' => now()->toISOString()
+                            ];
+                        } else {
+                            // Three or more players: skip next player
+                            $gameState['current_player'] = $this->crazyService->getNextPlayer(
+                                $playerIndex, $playerCount, !$gameState['direction'], 1
+                            );
+                            $gameState['current_suit'] = $card['suit'];
+                            
+                            $playerName = $gameState['players'][$playerIndex]['username'];
+                            $skippedPlayerName = $gameState['players'][$this->crazyService->getNextPlayer(
+                                $playerIndex, $playerCount, !$gameState['direction']
+                            )]['username'];
+                            $nextPlayerName = $gameState['players'][$gameState['current_player']]['username'];
+                            
+                            $gameState['last_notification'] = [
+                                'type' => 'turn_skip',
+                                'message' => "{$playerName} played 7! {$skippedPlayerName} is skipped, turn to {$nextPlayerName}.",
+                                'player_index' => $playerIndex,
+                                'skipped_player' => $this->crazyService->getNextPlayer(
+                                    $playerIndex, $playerCount, !$gameState['direction']
+                                ),
+                                'timestamp' => now()->toISOString()
+                            ];
+                        }
+                        $turnAdvanced = true;
                     }
-                    $turnAdvanced = true;
                     break;
             }
         }

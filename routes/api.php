@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Broadcast;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\GameController;
 use App\Http\Controllers\Api\LeaderboardController;
@@ -44,6 +45,158 @@ Route::prefix('v1')->group(function () {
     // Word validation (public for Letter Leap and word games)
     Route::post('/words/validate', [WordValidationController::class, 'validateWord']);
     Route::get('/words/stats', [WordValidationController::class, 'getWordStats']);
+});
+
+// Broadcasting authentication route (must be outside the v1 prefix)
+Route::post('/broadcasting/auth', function (Request $request) {
+    // Enhanced debug logging
+    \Log::info('Broadcasting auth request:', [
+        'method' => $request->method(),
+        'url' => $request->fullUrl(),
+        'headers' => [
+            'authorization' => $request->header('Authorization'),
+            'accept' => $request->header('Accept'),
+            'content-type' => $request->header('Content-Type'),
+            'x-requested-with' => $request->header('X-Requested-With'),
+        ],
+        'body' => $request->all(),
+        'raw_input' => $request->getContent(),
+        'channel_name' => $request->input('channel_name'),
+        'socket_id' => $request->input('socket_id'),
+        'has_auth_header' => $request->hasHeader('Authorization'),
+        'bearer_token' => $request->bearerToken(),
+        'user_id' => $request->user()?->id,
+        'user_authenticated' => !!$request->user(),
+    ]);
+    
+    // Check if user is authenticated
+    if (!$request->user()) {
+        \Log::warning('Broadcasting auth failed: No authenticated user');
+        return response()->json(['message' => 'Unauthenticated'], 401);
+    }
+    
+    // Check required parameters
+    if (!$request->input('channel_name') || !$request->input('socket_id')) {
+        \Log::warning('Broadcasting auth failed: Missing required parameters', [
+            'channel_name' => $request->input('channel_name'),
+            'socket_id' => $request->input('socket_id'),
+            'all_input' => $request->all(),
+            'content_type' => $request->header('Content-Type'),
+        ]);
+        return response()->json(['message' => 'Missing channel_name or socket_id'], 422);
+    }
+    
+    try {
+        $result = Broadcast::auth($request);
+        \Log::info('Broadcasting auth success:', [
+            'user_id' => $request->user()->id,
+            'channel_name' => $request->input('channel_name'),
+            'result_type' => gettype($result),
+        ]);
+        return $result;
+    } catch (\Exception $e) {
+        \Log::error('Broadcasting auth failed:', [
+            'error' => $e->getMessage(),
+            'user_id' => $request->user()?->id,
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'channel_name' => $request->input('channel_name'),
+            'socket_id' => $request->input('socket_id'),
+        ]);
+        return response()->json(['message' => $e->getMessage()], 403);
+    }
+})->middleware('auth:sanctum');
+
+// Temporary test route for WebSocket without auth (for debugging)
+Route::post('/broadcasting/auth-test', function (Request $request) {
+    // Return a mock auth response for testing
+    return response()->json([
+        'auth' => 'test-auth-signature',
+        'channel_data' => '{"user_id":1,"user_info":{"name":"Test User"}}'
+    ]);
+});
+
+// Debug auth test route
+Route::post('/debug/auth-test', function (Request $request) {
+    return response()->json([
+        'authenticated' => !!$request->user(),
+        'user' => $request->user(),
+        'token_preview' => $request->bearerToken() ? substr($request->bearerToken(), 0, 20) . '...' : null,
+        'headers' => [
+            'authorization' => $request->header('Authorization'),
+            'accept' => $request->header('Accept'),
+            'x-requested-with' => $request->header('X-Requested-With'),
+        ]
+    ]);
+})->middleware('auth:sanctum');
+
+// Debug route to test WebSocket broadcasting
+Route::post('/debug/broadcast-test', function (Request $request) {
+    $roomCode = $request->input('room_code', 'TEST123');
+    
+    // Broadcast a test event
+    broadcast(new \App\Events\CrazyGameUpdated(
+        $roomCode,
+        ['test' => 'data', 'timestamp' => now()->toISOString()],
+        'test_event',
+        null,
+        [],
+        ['type' => 'test', 'message' => 'WebSocket test broadcast from backend']
+    ));
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Test broadcast sent',
+        'room_code' => $roomCode
+    ]);
+})->middleware('auth:sanctum');
+
+// Public debug route to test WebSocket server without auth
+Route::post('/debug/ping-websocket', function (Request $request) {
+    try {
+        // Create a simple event for testing public channels
+        $testEvent = new class implements \Illuminate\Contracts\Broadcasting\ShouldBroadcastNow {
+            use \Illuminate\Broadcasting\InteractsWithSockets;
+            use \Illuminate\Foundation\Events\Dispatchable;
+            use \Illuminate\Queue\SerializesModels;
+            
+            public function broadcastOn() {
+                return new \Illuminate\Broadcasting\Channel('test.public');
+            }
+            
+            public function broadcastAs() {
+                return 'ping.test';
+            }
+            
+            public function broadcastWith() {
+                return [
+                    'message' => 'WebSocket server is working!',
+                    'timestamp' => now()->toISOString(),
+                    'test' => true
+                ];
+            }
+        };
+        
+        broadcast($testEvent);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'WebSocket ping sent successfully to public channel',
+            'config' => [
+                'broadcast_driver' => config('broadcasting.default'),
+                'reverb_app_id' => env('REVERB_APP_ID'),
+                'reverb_app_key' => env('REVERB_APP_KEY'),
+                'reverb_host' => env('REVERB_HOST', 'localhost'),
+                'reverb_port' => env('REVERB_PORT', 6001),
+            ]
+        ]);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'WebSocket ping failed: ' . $e->getMessage(),
+            'error' => $e->getMessage()
+        ]);
+    }
 });
 
 // Protected routes
@@ -168,3 +321,35 @@ Route::post('/debug/upload', function (Request $request) {
         ]
     ]);
 });
+
+// Debug route to test invitation broadcasting
+Route::post('/test/invitation/{userId}', function ($userId) {
+    $testInvitation = [
+        'invitation_id' => 999,
+        'room' => [
+            'id' => 1,
+            'room_code' => 'TEST123',
+            'room_name' => 'Test Room',
+            'description' => 'WebSocket Test Room',
+            'host_user_id' => 1,
+            'game_id' => 1,
+            'current_players' => 1,
+            'max_players' => 4,
+            'status' => 'waiting',
+            'host' => ['id' => 1, 'name' => 'Test Host'],
+            'game' => ['id' => 1, 'title' => 'Test Game', 'slug' => 'test']
+        ],
+        'invited_at' => now(),
+        'share_url' => 'http://localhost:3000/test',
+        'inviter' => ['id' => 1, 'name' => 'Test Inviter'],
+        'is_replay' => false
+    ];
+    
+    broadcast(new \App\Events\InvitationReceived($userId, $testInvitation));
+    
+    return response()->json([
+        'success' => true,
+        'message' => "Test invitation sent to user {$userId}",
+        'data' => $testInvitation
+    ]);
+})->middleware('auth:sanctum');

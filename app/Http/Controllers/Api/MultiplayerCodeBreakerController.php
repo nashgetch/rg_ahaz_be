@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\MultiplayerRoom;
 use App\Models\MultiplayerParticipant;
 use App\Services\StrictBettingService;
+use App\Events\CodebreakerGameUpdated;
+use App\Events\MultiplayerRoomUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -236,6 +238,23 @@ class MultiplayerCodeBreakerController extends Controller
         // Check if all participants have finished
         $this->checkGameCompletion($room);
 
+        // Broadcast game update via WebSocket
+        broadcast(new CodebreakerGameUpdated(
+            $room->room_code,
+            'guess_made',
+            Auth::id(),
+            [
+                'guess' => $guess,
+                'feedback' => $feedback,
+                'is_correct' => $isCorrect,
+                'attempts_remaining' => 7 - $attempts,
+                'attempt' => $attempts,
+                'score' => $score,
+                'game_finished' => $isCorrect || $attempts >= 7,
+                'leaderboard' => $this->getRoomLeaderboard($room)
+            ]
+        ));
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -357,6 +376,18 @@ class MultiplayerCodeBreakerController extends Controller
                 'hints' => $globalHints
             ])
         ]);
+
+        // Broadcast hint update via WebSocket
+        broadcast(new CodebreakerGameUpdated(
+            $room->room_code,
+            'hint_used',
+            Auth::id(),
+            [
+                'hint' => $hint,
+                'hints_remaining' => 1 - $hintsUsed,
+                'all_hints' => $globalHints
+            ]
+        ));
 
         return response()->json([
             'success' => true,

@@ -8,6 +8,8 @@ use App\Models\MultiplayerRoom;
 use App\Models\MultiplayerParticipant;
 use App\Models\User;
 use App\Services\StrictBettingService;
+use App\Events\InvitationReceived;
+use App\Events\LobbyUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -953,8 +955,16 @@ class MultiplayerController extends Controller
 
         // Don't increment current_players until invitation is accepted
 
-        // In a real app, you'd send a notification to the invited user
-        // For now, we'll just return success
+        // Broadcast invitation to the invited user via WebSocket
+        $invitationData = [
+            'invitation_id' => $participant->id,
+            'room' => $room->load(['host:id,name', 'game:id,title,slug']),
+            'invited_at' => $participant->created_at,
+            'share_url' => $room->getShareUrl(),
+            'inviter' => Auth::user()->only(['id', 'name'])
+        ];
+        
+        broadcast(new InvitationReceived($invitedUser->id, $invitationData));
 
         return response()->json([
             'success' => true,
@@ -1166,6 +1176,13 @@ class MultiplayerController extends Controller
             // Now increment current_players count
             $invitation->room->increment('current_players');
             
+            // Broadcast room update to all participants
+            broadcast(new LobbyUpdated($invitation->room->room_code, [
+                'type' => 'player_joined',
+                'user' => $user->only(['id', 'name']),
+                'room' => $invitation->room->fresh()->load(['participants.user:id,name', 'host:id,name', 'game:id,title,slug'])
+            ]));
+            
             return response()->json([
                 'success' => true,
                 'message' => 'Invitation accepted successfully. Mark yourself as ready to pay entry fee and start playing.',
@@ -1175,8 +1192,16 @@ class MultiplayerController extends Controller
             ]);
         } else {
             // Decline invitation
+            $room = $invitation->room; // Store room before deletion
             $invitation->delete();
-            $invitation->room->decrement('current_players');
+            $room->decrement('current_players');
+            
+            // Broadcast to host that invitation was declined
+            broadcast(new LobbyUpdated($room->room_code, [
+                'type' => 'invitation_declined',
+                'user' => $user->only(['id', 'name']),
+                'room' => $room->fresh()->load(['participants.user:id,name', 'host:id,name', 'game:id,title,slug'])
+            ]));
             
             return response()->json([
                 'success' => true,
@@ -1265,7 +1290,7 @@ class MultiplayerController extends Controller
 
         // Create new invitation records for all previous participants
         foreach ($participants as $participant) {
-            MultiplayerParticipant::create([
+            $newInvitation = MultiplayerParticipant::create([
                 'room_id' => $room->id,
                 'user_id' => $participant->user_id,
                 'status' => 'invited',
@@ -1275,6 +1300,18 @@ class MultiplayerController extends Controller
                 'locked_tokens' => 0, // Clean locked tokens
                 'score' => 0 // Clean score
             ]);
+
+            // Broadcast replay invitation to each participant
+            $invitationData = [
+                'invitation_id' => $newInvitation->id,
+                'room' => $room->load(['host:id,name', 'game:id,title,slug']),
+                'invited_at' => $newInvitation->created_at,
+                'share_url' => $room->getShareUrl(),
+                'inviter' => Auth::user()->only(['id', 'name']),
+                'is_replay' => true
+            ];
+            
+            broadcast(new InvitationReceived($participant->user_id, $invitationData));
         }
 
         return response()->json([

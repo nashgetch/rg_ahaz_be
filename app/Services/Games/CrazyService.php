@@ -231,7 +231,7 @@ class CrazyService
     /**
      * Check if a penalty card can counter another penalty card
      * Rules:
-     * - Ace of Spades can ONLY be countered by another Ace of Spades (strict rule)
+     * - Ace of Spades can ONLY be countered by another Ace of Spades OR 2 of Spades (same suit)
      * - 2 can be countered by any other 2, or by A♠
      * - Different penalty types cannot counter each other (2♣ cannot counter A♠)
      */
@@ -242,9 +242,10 @@ class CrazyService
             return false;
         }
         
-        // A♠ can ONLY be countered by another A♠ - NO EXCEPTIONS
+        // A♠ can be countered by another A♠ OR by 2♠ (same suit propagation)
         if ($currentCard['number'] === 'A' && $currentCard['suit'] === 'spades') {
-            return $counterCard['number'] === 'A' && $counterCard['suit'] === 'spades';
+            return ($counterCard['number'] === 'A' && $counterCard['suit'] === 'spades') ||
+                   ($counterCard['number'] === '2' && $counterCard['suit'] === 'spades');
         }
         
         // 2 can be countered by any other 2, or by A♠
