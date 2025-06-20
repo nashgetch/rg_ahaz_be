@@ -236,6 +236,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::post('/rooms/{roomCode}/join', [MultiplayerController::class, 'join']);
         Route::post('/rooms/{roomCode}/leave', [MultiplayerController::class, 'leave']);
         Route::post('/rooms/{roomCode}/ready', [MultiplayerController::class, 'ready']);
+        Route::post('/rooms/{roomCode}/shuffle-players', [MultiplayerController::class, 'shufflePlayers']);
         Route::post('/rooms/{roomCode}/bet', [MultiplayerController::class, 'placeBet']);
         Route::post('/rooms/{roomCode}/propose-bet', [MultiplayerController::class, 'proposeBet']);
         Route::post('/rooms/{roomCode}/respond-bet', [MultiplayerController::class, 'respondToBetProposal']);

@@ -13,6 +13,7 @@ use App\Events\LobbyUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
@@ -393,6 +394,83 @@ class MultiplayerController extends Controller
             'success' => true,
             'message' => 'Marked as ready. Entry fee of ' . $tokenCost . ' tokens deducted.',
             'data' => $room->load(['participants.user:id,name'])
+        ]);
+    }
+
+    /**
+     * Shuffle player order (Host only, only when not all players are ready)
+     */
+    public function shufflePlayers(string $roomCode): JsonResponse
+    {
+        $room = MultiplayerRoom::where('room_code', $roomCode)->first();
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Room not found'
+            ], 404);
+        }
+
+        $participant = $room->participants()->where('user_id', Auth::id())->first();
+
+        if (!$participant) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not in this room'
+            ], 400);
+        }
+
+        // Only host can shuffle players
+        if (!$participant->is_host) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only the host can shuffle player order'
+            ], 403);
+        }
+
+        // Can only shuffle when room is waiting
+        if ($room->status !== 'waiting') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot shuffle players after game has started'
+            ], 400);
+        }
+
+        // Check if all players are ready - if so, no shuffling allowed
+        $participants = $room->participants()->get();
+        $allReady = $participants->every(function ($p) {
+            return $p->status === 'ready';
+        });
+
+        if ($allReady) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot shuffle players when all players are ready'
+            ], 400);
+        }
+
+        // Shuffle the participants by updating their created_at timestamps
+        // This changes their order when queried
+        $shuffledIds = $participants->pluck('id')->shuffle();
+        $baseTime = now();
+        
+        foreach ($shuffledIds as $index => $participantId) {
+            \DB::table('multiplayer_participants')
+                ->where('id', $participantId)
+                ->update(['created_at' => $baseTime->copy()->addSeconds($index)]);
+        }
+
+        // Broadcast the shuffle to all players
+        broadcast(new LobbyUpdated($room->room_code, [
+            'type' => 'players_shuffled',
+            'user' => Auth::user()->only(['id', 'name']),
+            'room' => $room->fresh()->load(['participants.user:id,name', 'host:id,name', 'game:id,title,slug'])
+        ]));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Player order shuffled successfully',
+            'data' => $room->fresh()->load(['participants.user:id,name'])
         ]);
     }
 

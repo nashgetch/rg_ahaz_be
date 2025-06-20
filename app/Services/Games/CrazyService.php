@@ -41,7 +41,7 @@ class CrazyService
     /**
      * Deal cards to players
      */
-    public function dealCards(array $deck, int $playerCount, int $cardsPerPlayer): array
+    public function dealCards(array $deck, int $playerCount, int $cardsPerPlayer, int $starterIndex): array
     {
         $hands = [];
         $deckIndex = 0;
@@ -52,7 +52,7 @@ class CrazyService
             $cardsToGet = $cardsPerPlayer;
             
             // Starter (first player) gets one extra card
-            if ($player === 0) {
+            if ($player === $starterIndex) {
                 $cardsToGet++;
             }
             
@@ -350,14 +350,18 @@ class CrazyService
     {
         $playerCount = count($participants);
         $deck = $this->generateDecks();
-        $dealResult = $this->dealCards($deck, $playerCount, $cardsPerPlayer);
+        
+        // Randomize starter player
+        $starterIndex = rand(0, $playerCount - 1);
+        
+        $dealResult = $this->dealCards($deck, $playerCount, $cardsPerPlayer, $starterIndex);
         
         // Initialize game state
         $gameState = [
             'deck' => $dealResult['remaining_deck'],
             'players' => [],
             'discard_pile' => [],
-            'current_player' => 0, // Starter
+            'current_player' => $starterIndex, // Randomized starter
             'direction' => false, // Counter-clockwise (Ethiopian style)
             'current_suit' => null,
             'penalty_chain' => 0,
@@ -375,11 +379,21 @@ class CrazyService
                 'penalties' => 0,
                 'mistakes' => 0,
                 'said_qeregn' => false,
-                'is_starter' => $index === 0
+                'is_starter' => $index === $starterIndex
             ];
         }
         
         return $gameState;
+    }
+    
+    /**
+     * Shuffle participants array for random player ordering
+     */
+    public function shuffleParticipants(array $participants): array
+    {
+        $shuffled = $participants;
+        shuffle($shuffled);
+        return $shuffled;
     }
     
     /**

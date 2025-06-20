@@ -460,7 +460,9 @@ class MultiplayerCrazyController extends Controller
             'type' => 'qeregn',
             'message' => "{$playerName} said Qeregn!",
             'player_index' => $playerIndex,
-            'timestamp' => now()->toISOString()
+            'timestamp' => now()->toISOString(),
+            'id' => uniqid('qeregn_', true), // Unique ID to prevent duplicates
+            'turn_count' => $gameState['turn_count'] ?? 0 // Track which turn this was for
         ];
         
         $room->update(['game_state' => $gameState]);
@@ -881,7 +883,17 @@ class MultiplayerCrazyController extends Controller
         // Get game state safely - handle null or invalid game state
         $gameState = null;
         if ($room->game_state && isset($room->game_state['players']) && is_array($room->game_state['players'])) {
-            $gameState = $this->getPlayerGameState($room->game_state, Auth::id());
+            $roomGameState = $room->game_state;
+            
+            // Clear old notifications to prevent redundant alerts
+            $this->clearOldNotifications($roomGameState);
+            
+            // Update room with cleaned game state if notifications were cleared
+            if ($roomGameState !== $room->game_state) {
+                $room->update(['game_state' => $roomGameState]);
+            }
+            
+            $gameState = $this->getPlayerGameState($roomGameState, Auth::id());
         }
 
         return response()->json([
@@ -2196,7 +2208,9 @@ class MultiplayerCrazyController extends Controller
                                 'type' => 'turn_rotation',
                                 'message' => "{$playerName} played 5! Turn rotated back to {$playerName}.",
                                 'player_index' => $playerIndex,
-                                'timestamp' => now()->toISOString()
+                                'timestamp' => now()->toISOString(),
+                                'id' => uniqid('turn_rotation_', true), // Unique ID to prevent duplicates
+                                'turn_count' => $gameState['turn_count'] ?? 0 // Track which turn this was for
                             ];
                         } else {
                             // Three or more players: reverse direction and go to next player in NEW direction
@@ -2212,7 +2226,9 @@ class MultiplayerCrazyController extends Controller
                                 'message' => "{$playerName} played 5! Direction is now {$newDirection}, turn to {$nextPlayerName}.",
                                 'player_index' => $playerIndex,
                                 'direction' => $gameState['direction'],
-                                'timestamp' => now()->toISOString()
+                                'timestamp' => now()->toISOString(),
+                                'id' => uniqid('direction_change_', true), // Unique ID to prevent duplicates
+                                'turn_count' => $gameState['turn_count'] ?? 0 // Track which turn this was for
                             ];
                         }
                         $turnAdvanced = true;
@@ -2247,7 +2263,9 @@ class MultiplayerCrazyController extends Controller
                                 'skipped_player' => $this->crazyService->getNextPlayer(
                                     $playerIndex, $playerCount, !$gameState['direction']
                                 ),
-                                'timestamp' => now()->toISOString()
+                                'timestamp' => now()->toISOString(),
+                                'id' => uniqid('turn_skip_', true), // Unique ID to prevent duplicates
+                                'turn_count' => $gameState['turn_count'] ?? 0 // Track which turn this was for
                             ];
                         } else {
                             // Three or more players: skip next player
@@ -2269,7 +2287,9 @@ class MultiplayerCrazyController extends Controller
                                 'skipped_player' => $this->crazyService->getNextPlayer(
                                     $playerIndex, $playerCount, !$gameState['direction']
                                 ),
-                                'timestamp' => now()->toISOString()
+                                'timestamp' => now()->toISOString(),
+                                'id' => uniqid('turn_skip_', true), // Unique ID to prevent duplicates
+                                'turn_count' => $gameState['turn_count'] ?? 0 // Track which turn this was for
                             ];
                         }
                         $turnAdvanced = true;
@@ -2345,6 +2365,32 @@ class MultiplayerCrazyController extends Controller
             if (empty($gameState['deck'])) {
                 $gameState['deck'] = $this->crazyService->generateDeck();
                 shuffle($gameState['deck']);
+            }
+        }
+    }
+    
+    /**
+     * Clear old notifications to prevent redundant alerts
+     */
+    private function clearOldNotifications(&$gameState): void
+    {
+        if (isset($gameState['last_notification'])) {
+            $notification = $gameState['last_notification'];
+            $timestamp = $notification['timestamp'] ?? null;
+            
+            if ($timestamp) {
+                $notificationTime = \Carbon\Carbon::parse($timestamp);
+                $now = now();
+                
+                // Clear notifications older than 30 seconds
+                if ($now->diffInSeconds($notificationTime) > 30) {
+                    unset($gameState['last_notification']);
+                    \Log::info('Cleared old notification to prevent redundant alerts', [
+                        'notification_type' => $notification['type'] ?? 'unknown',
+                        'notification_age_seconds' => $now->diffInSeconds($notificationTime),
+                        'notification_id' => $notification['id'] ?? 'no_id'
+                    ]);
+                }
             }
         }
     }
