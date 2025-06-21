@@ -67,7 +67,7 @@ Broadcast::channel('crazy.room.{roomId}', function ($user, $roomId) {
     ]);
     return true;
 });
-
+    
 // Private channel for Codebreaker game rooms
 Broadcast::channel('codebreaker.room.{roomId}', function ($user, $roomId) {
     $room = MultiplayerRoom::where('room_code', $roomId)->orWhere('id', $roomId)->first();
@@ -100,6 +100,6 @@ Broadcast::channel('chat.room.{roomId}', function ($user, $roomId) {
     }
     
     return true;
-});
+}); 
 
 // Public channels don't need authorization - they're automatically available 

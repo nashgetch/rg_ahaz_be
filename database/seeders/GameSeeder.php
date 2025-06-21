@@ -175,6 +175,37 @@ class GameSeeder extends Seeder
                 'token_cost' => 15,
                 'max_score_reward' => 200,
                 'enabled' => true
+            ],
+            [
+                'slug' => 'hangman',
+                'title' => 'Hangman',
+                'description' => 'Classic word guessing game. Guess the word letter by letter before the drawing is complete.',
+                'mechanic' => 'word',
+                'config' => [
+                    'min_word_length' => 4,
+                    'max_word_length' => 12,
+                    'max_wrong_guesses' => 7,
+                    'time_limit' => 120,
+                    'dictionary_size' => 400,
+                    'scoring' => [
+                        'base_points' => 100,
+                        'letter_bonus' => 10,
+                        'wrong_guess_penalty' => 20,
+                        'time_bonus_max' => 50,
+                        'perfect_game_bonus' => 200
+                    ],
+                    'difficulty_levels' => ['easy', 'medium', 'hard'],
+                    'languages' => ['en'],
+                    'lives' => 7,
+                    'max_attempts_per_day' => 20
+                ],
+                'token_cost' => 9,
+                'max_score_reward' => 100,
+                'enabled' => true,
+                'instructions' => [
+                    'en' => 'Guess the hidden word by selecting letters. You have 7 wrong guesses before the hangman is complete. Correct guesses reveal all instances of that letter.',
+                    'am' => 'የተደበቀውን ቃል ፊደላትን በመምረጥ ይገምቱ። የሰቅላው ስዕል ከመጠናቀቁ በፊት 7 የተሳሳቱ ግምቶች አሉዎት። ትክክለኛ ግምቶች የዚያን ፊደል ሁሉንም ምሳሌዎች ያሳያሉ።'
+                ]
             ]
         ];
 

@@ -17,6 +17,8 @@ use App\Http\Controllers\Api\SumChaserController;
 use App\Http\Controllers\Api\MultiplayerController;
 use App\Http\Controllers\Api\MultiplayerCodeBreakerController;
 use App\Http\Controllers\Api\MultiplayerCrazyController;
+use App\Http\Controllers\Api\HangmanController;
+use App\Http\Controllers\GeoQuestionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -45,6 +47,11 @@ Route::prefix('v1')->group(function () {
     // Word validation (public for Letter Leap and word games)
     Route::post('/words/validate', [WordValidationController::class, 'validateWord']);
     Route::get('/words/stats', [WordValidationController::class, 'getWordStats']);
+    
+    // GeoSprint questions (public for easy access)
+    Route::get('/geo-questions', [GeoQuestionController::class, 'getGameQuestions']);
+    Route::get('/geo-questions/category/{category}', [GeoQuestionController::class, 'getQuestionsByCategory']);
+    Route::get('/geo-questions/stats', [GeoQuestionController::class, 'getStatistics']);
 });
 
 // Broadcasting authentication route (must be outside the v1 prefix)
@@ -283,6 +290,16 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/codebreaker/hint', [CodeBreakerController::class, 'getHint']);
     Route::post('/codebreaker/timeout', [CodeBreakerController::class, 'handleTimeout']);
     Route::get('/codebreaker/state/{round}', [CodeBreakerController::class, 'getGameState']);
+    
+    // Hangman specific routes
+    Route::post('/hangman/start', [HangmanController::class, 'startRound']);
+    Route::post('/hangman/guess', [HangmanController::class, 'processGuess']);
+    Route::post('/hangman/submit', [HangmanController::class, 'submitRound']);
+    Route::post('/hangman/hint', [HangmanController::class, 'getHint']);
+    
+    // GeoSprint streak tracking (requires authentication)
+    Route::post('/geo-questions/update-streak', [GeoQuestionController::class, 'updateStreakData']);
+    Route::get('/geo-questions/user-stats', [GeoQuestionController::class, 'getUserStats']);
     
     // Transactions
     Route::get('/transactions', [TransactionController::class, 'index']);

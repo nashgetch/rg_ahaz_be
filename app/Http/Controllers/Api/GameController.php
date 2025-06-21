@@ -267,6 +267,9 @@ class GameController extends Controller
                     'max_attempts' => $gameData['max_attempts'],
                     'hints_available' => $gameData['hints_available']
                 ];
+            } elseif ($game->slug === 'hangman') {
+                // For hangman, delegate to HangmanController
+                return app(\App\Http\Controllers\Api\HangmanController::class)->startRound($request);
             }
 
             return response()->json([
