@@ -88,25 +88,44 @@ class GeoQuestion extends Model
     }
 
     /**
-     * Get random questions excluding specific IDs
+     * Get random questions excluding specific IDs with enhanced randomization
      */
     public static function getRandomQuestionsExcluding($count = 10, $excludeIds = [])
     {
-        $query = self::active()->inRandomOrder();
+        // Use time-based seed for session variety
+        $randomSeed = time() + rand(1, 1000) + count($excludeIds);
+        srand($randomSeed);
         
-        if (!empty($excludeIds)) {
-            $query->whereNotIn('question_id', $excludeIds);
+        // Get large pool and randomize locally for better cross-session variety
+        $poolSize = min($count * 10, 1000); // Get larger pool for better randomization
+        
+        $candidates = self::active()
+            ->when(!empty($excludeIds), function ($query) use ($excludeIds) {
+                $query->whereNotIn('question_id', $excludeIds);
+            })
+            ->inRandomOrder()
+            ->limit($poolSize)
+            ->get();
+        
+        // Multiple shuffles for maximum randomness
+        for ($i = 0; $i < 3; $i++) {
+            $candidates = $candidates->shuffle();
         }
         
-        return $query->limit($count)->get();
+        // Add random offset selection for more variety
+        $offset = rand(0, max(0, $candidates->count() - $count));
+        
+        return $candidates->skip($offset)->take($count);
     }
 
     /**
-     * Get enhanced varied questions with exclusions and better distribution
+     * Get enhanced varied questions with exclusions and maximum randomization
      */
     public static function getEnhancedVariedQuestions($count = 10, $excludeIds = [])
     {
-        $questions = collect();
+        // Use time-based randomization seed for more variety across sessions
+        $randomSeed = time() + rand(1, 1000);
+        srand($randomSeed);
         
         // Get all available categories dynamically
         $categories = self::active()
@@ -116,55 +135,90 @@ class GeoQuestion extends Model
             ->toArray();
         
         if (empty($categories)) {
-            // Fallback to random questions if no categories found
             return self::getRandomQuestionsExcluding($count, $excludeIds);
         }
         
+        // Shuffle categories for random order
+        shuffle($categories);
+        
         $difficulties = ['easy', 'medium', 'hard'];
+        shuffle($difficulties); // Randomize difficulty order too
         
-        // Target distribution: balanced across categories and difficulties
-        $questionsPerCategory = ceil($count / count($categories));
-        $difficultyWeights = ['easy' => 0.4, 'medium' => 0.4, 'hard' => 0.2];
+        // More random distribution - vary weights per session
+        $randomDistributions = [
+            ['easy' => 0.5, 'medium' => 0.3, 'hard' => 0.2],
+            ['easy' => 0.3, 'medium' => 0.5, 'hard' => 0.2],
+            ['easy' => 0.4, 'medium' => 0.4, 'hard' => 0.2],
+            ['easy' => 0.6, 'medium' => 0.2, 'hard' => 0.2],
+            ['easy' => 0.2, 'medium' => 0.6, 'hard' => 0.2],
+        ];
+        $difficultyWeights = $randomDistributions[array_rand($randomDistributions)];
         
-        foreach ($categories as $category) {
-            $categoryQuestions = collect();
-            
-            // Get questions for each difficulty level within category
-            foreach ($difficulties as $difficulty) {
-                $targetCount = max(1, round($questionsPerCategory * $difficultyWeights[$difficulty]));
+        // Collect questions with maximum randomization
+        $allCandidates = self::active()
+            ->when(!empty($excludeIds), function ($query) use ($excludeIds) {
+                $query->whereNotIn('question_id', $excludeIds);
+            })
+            ->inRandomOrder()
+            ->get();
+        
+        // Group by category and difficulty for variety
+        $groupedQuestions = $allCandidates->groupBy(function ($question) {
+            return $question->category . '_' . $question->difficulty;
+        });
+        
+        $selectedQuestions = collect();
+        $categoryCounts = array_fill_keys($categories, 0);
+        $targetPerCategory = ceil($count / count($categories));
+        
+        // Multiple passes for maximum randomization
+        for ($pass = 0; $pass < 3 && $selectedQuestions->count() < $count; $pass++) {
+            foreach ($categories as $category) {
+                if ($selectedQuestions->count() >= $count) break;
+                if ($categoryCounts[$category] >= $targetPerCategory) continue;
                 
-                $difficultyQuestions = self::active()
-                    ->byCategory($category)
-                    ->byDifficulty($difficulty)
-                    ->when(!empty($excludeIds), function ($query) use ($excludeIds) {
-                        $query->whereNotIn('question_id', $excludeIds);
-                    })
-                    ->inRandomOrder()
-                    ->limit($targetCount)
-                    ->get();
+                // Randomly select difficulty for this category
+                $difficulty = $difficulties[array_rand($difficulties)];
+                $groupKey = $category . '_' . $difficulty;
                 
-                $categoryQuestions = $categoryQuestions->merge($difficultyQuestions);
+                if (isset($groupedQuestions[$groupKey]) && $groupedQuestions[$groupKey]->isNotEmpty()) {
+                    // Take random question from this group
+                    $question = $groupedQuestions[$groupKey]->random();
+                    
+                    // Avoid duplicates
+                    if (!$selectedQuestions->contains('question_id', $question->question_id)) {
+                        $selectedQuestions->push($question);
+                        $categoryCounts[$category]++;
+                        
+                        // Remove from pool to avoid re-selection
+                        $groupedQuestions[$groupKey] = $groupedQuestions[$groupKey]
+                            ->reject(function ($q) use ($question) {
+                                return $q->question_id === $question->question_id;
+                            });
+                    }
+                }
             }
-            
-            // If we don't have enough questions due to exclusions, fill with random from category
-            if ($categoryQuestions->count() < $questionsPerCategory) {
-                $usedIds = $categoryQuestions->pluck('question_id')->toArray();
-                $allExcludeIds = array_merge($excludeIds, $usedIds);
-                
-                $fillQuestions = self::active()
-                    ->byCategory($category)
-                    ->whereNotIn('question_id', $allExcludeIds)
-                    ->inRandomOrder()
-                    ->limit($questionsPerCategory - $categoryQuestions->count())
-                    ->get();
-                
-                $categoryQuestions = $categoryQuestions->merge($fillQuestions);
-            }
-            
-            $questions = $questions->merge($categoryQuestions);
         }
         
-        // Final shuffle and limit to exact count
-        return $questions->shuffle()->take($count);
+        // Fill remaining slots with completely random questions if needed
+        while ($selectedQuestions->count() < $count && $allCandidates->isNotEmpty()) {
+            $randomQuestion = $allCandidates->random();
+            
+            if (!$selectedQuestions->contains('question_id', $randomQuestion->question_id)) {
+                $selectedQuestions->push($randomQuestion);
+            }
+            
+            $allCandidates = $allCandidates->reject(function ($q) use ($randomQuestion) {
+                return $q->question_id === $randomQuestion->question_id;
+            });
+        }
+        
+        // Multiple shuffles for maximum randomness
+        $result = $selectedQuestions->shuffle();
+        for ($i = 0; $i < 3; $i++) {
+            $result = $result->shuffle();
+        }
+        
+        return $result->take($count);
     }
 } 
