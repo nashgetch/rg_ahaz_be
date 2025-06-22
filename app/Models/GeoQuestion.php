@@ -86,4 +86,73 @@ class GeoQuestion extends Model
         // Shuffle and take the required count
         return $questions->shuffle()->take($count);
     }
+
+    /**
+     * Get random questions excluding specific IDs
+     */
+    public static function getRandomQuestionsExcluding($count = 10, $excludeIds = [])
+    {
+        $query = self::active()->inRandomOrder();
+        
+        if (!empty($excludeIds)) {
+            $query->whereNotIn('question_id', $excludeIds);
+        }
+        
+        return $query->limit($count)->get();
+    }
+
+    /**
+     * Get enhanced varied questions with exclusions and better distribution
+     */
+    public static function getEnhancedVariedQuestions($count = 10, $excludeIds = [])
+    {
+        $questions = collect();
+        $categories = ['ethiopia', 'africa', 'world'];
+        $difficulties = ['easy', 'medium', 'hard'];
+        
+        // Target distribution: balanced across categories and difficulties
+        $questionsPerCategory = ceil($count / 3);
+        $difficultyWeights = ['easy' => 0.4, 'medium' => 0.4, 'hard' => 0.2];
+        
+        foreach ($categories as $category) {
+            $categoryQuestions = collect();
+            
+            // Get questions for each difficulty level within category
+            foreach ($difficulties as $difficulty) {
+                $targetCount = max(1, round($questionsPerCategory * $difficultyWeights[$difficulty]));
+                
+                $difficultyQuestions = self::active()
+                    ->byCategory($category)
+                    ->byDifficulty($difficulty)
+                    ->when(!empty($excludeIds), function ($query) use ($excludeIds) {
+                        $query->whereNotIn('question_id', $excludeIds);
+                    })
+                    ->inRandomOrder()
+                    ->limit($targetCount)
+                    ->get();
+                
+                $categoryQuestions = $categoryQuestions->merge($difficultyQuestions);
+            }
+            
+            // If we don't have enough questions due to exclusions, fill with random from category
+            if ($categoryQuestions->count() < $questionsPerCategory) {
+                $usedIds = $categoryQuestions->pluck('question_id')->toArray();
+                $allExcludeIds = array_merge($excludeIds, $usedIds);
+                
+                $fillQuestions = self::active()
+                    ->byCategory($category)
+                    ->whereNotIn('question_id', $allExcludeIds)
+                    ->inRandomOrder()
+                    ->limit($questionsPerCategory - $categoryQuestions->count())
+                    ->get();
+                
+                $categoryQuestions = $categoryQuestions->merge($fillQuestions);
+            }
+            
+            $questions = $questions->merge($categoryQuestions);
+        }
+        
+        // Final shuffle and limit to exact count
+        return $questions->shuffle()->take($count);
+    }
 } 

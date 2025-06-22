@@ -16,7 +16,9 @@ class SeedGeoQuestions extends Command
                             {file? : Path to the JSON file containing questions}
                             {--force : Force seeding even if questions already exist}
                             {--dry-run : Preview what would be done without making changes}
-                            {--backup : Create a backup before seeding}';
+                            {--backup : Create a backup before seeding}
+                            {--comprehensive : Merge existing questions with new 5000 questions for 7000 total}
+                            {--new-file=trivia_5000_questions.json : Path to new questions file for comprehensive seeding}';
 
     /**
      * The console command description.
@@ -31,6 +33,45 @@ class SeedGeoQuestions extends Command
         $this->info('🌍 GeoSprint Question Seeder');
         $this->info('================================');
 
+        // Check if comprehensive seeding is requested
+        if ($this->option('comprehensive')) {
+            return $this->handleComprehensiveSeeding();
+        }
+
+        // Regular seeding logic
+        return $this->handleRegularSeeding();
+    }
+
+    /**
+     * Handle comprehensive seeding (merge 2000 + 5000 = 7000)
+     */
+    private function handleComprehensiveSeeding(): int
+    {
+        $this->info('🚀 COMPREHENSIVE SEEDING MODE');
+        $this->info('Target: Merge existing + 5000 new questions');
+        $this->newLine();
+
+        try {
+            $this->call('db:seed', [
+                '--class' => 'ComprehensiveGeoQuestionSeeder',
+                '--force' => true
+            ]);
+            
+            $this->newLine();
+            $this->info('✅ Comprehensive seeding completed successfully!');
+            return 0;
+            
+        } catch (\Exception $e) {
+            $this->error('❌ Comprehensive seeding failed: ' . $e->getMessage());
+            return 1;
+        }
+    }
+
+    /**
+     * Handle regular seeding
+     */
+    private function handleRegularSeeding(): int
+    {
         // Get file path
         $filePath = $this->argument('file');
         if (!$filePath) {
@@ -40,6 +81,7 @@ class SeedGeoQuestions extends Command
         if (!$filePath) {
             $this->error('❌ No JSON file found or specified.');
             $this->info('💡 Usage: php artisan geo:seed-questions [file-path]');
+            $this->info('💡 Or use: php artisan geo:seed-questions --comprehensive');
             return 1;
         }
 

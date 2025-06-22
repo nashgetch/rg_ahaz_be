@@ -16,6 +16,7 @@ class GeoQuestionController extends Controller
         try {
             $count = $request->get('count', 10);
             $variety = $request->get('variety', true);
+            $excludeIds = $request->get('exclude_ids', '');
             
             // Validate count
             if ($count < 1 || $count > 50) {
@@ -25,11 +26,17 @@ class GeoQuestionController extends Controller
                 ], 400);
             }
             
-            // Get questions with variety or random
+            // Parse exclude IDs
+            $excludeArray = [];
+            if (!empty($excludeIds)) {
+                $excludeArray = array_filter(explode(',', $excludeIds));
+            }
+            
+            // Get questions with enhanced variety and exclusions
             if ($variety) {
-                $questions = GeoQuestion::getVariedQuestions($count);
+                $questions = GeoQuestion::getEnhancedVariedQuestions($count, $excludeArray);
             } else {
-                $questions = GeoQuestion::getRandomQuestions($count);
+                $questions = GeoQuestion::getRandomQuestionsExcluding($count, $excludeArray);
             }
             
             // Transform questions for frontend
@@ -49,7 +56,8 @@ class GeoQuestionController extends Controller
             return response()->json([
                 'success' => true,
                 'questions' => $formattedQuestions,
-                'count' => $formattedQuestions->count()
+                'count' => $formattedQuestions->count(),
+                'excluded_count' => count($excludeArray)
             ]);
             
         } catch (\Exception $e) {

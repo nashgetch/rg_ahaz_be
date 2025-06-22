@@ -109,7 +109,7 @@ class StrictBettingService
                 'username' => $participant->user->name,
                 'reason' => $reason,
                 'abandoned_at' => now()->toISOString(),
-                'bet_amount' => $participant->bet_amount ?? 0
+                'bet_amount' => $participant->locked_tokens ?? 0
             ];
             
             $room->update(['abandonment_log' => $abandonmentLog]);
@@ -330,6 +330,26 @@ class StrictBettingService
             ]);
         }
 
+        // ✅ FIX: Deduct bet tokens from ALL participants (including winner who gets them back via winnings)
+        foreach ($room->participants as $participant) {
+            if ($participant->locked_tokens > 0) {
+                // Deduct the bet amount from balance (this removes their locked bet)
+                $participant->user->spendTokens(
+                    $participant->locked_tokens,
+                    "Bet deduction from room {$room->room_code}",
+                    ['room_code' => $room->room_code, 'participant_type' => $participant->user_id === $winner->user_id ? 'winner' : 'loser']
+                );
+                
+                Log::info("Deducted bet tokens from participant", [
+                    'room_code' => $room->room_code,
+                    'user_id' => $participant->user_id,
+                    'user_name' => $participant->user->name,
+                    'bet_amount' => $participant->locked_tokens,
+                    'is_winner' => $participant->user_id === $winner->user_id
+                ]);
+            }
+        }
+
         return [
             'completed' => true,
             'winner' => $winner,
@@ -364,6 +384,26 @@ class StrictBettingService
                 'completed_participants' => $completedParticipants->count(),
                 'abandoned_participants' => $abandonedParticipants->count()
             ]);
+        }
+
+        // ✅ FIX: Deduct bet tokens from ALL participants (including winner who gets them back via winnings)
+        foreach ($room->participants as $participant) {
+            if ($participant->locked_tokens > 0) {
+                // Deduct the bet amount from balance (this removes their locked bet)
+                $participant->user->spendTokens(
+                    $participant->locked_tokens,
+                    "Bet deduction from room {$room->room_code}",
+                    ['room_code' => $room->room_code, 'participant_type' => $participant->user_id === $winner->user_id ? 'winner' : 'loser']
+                );
+                
+                Log::info("Deducted bet tokens from participant", [
+                    'room_code' => $room->room_code,
+                    'user_id' => $participant->user_id,
+                    'user_name' => $participant->user->name,
+                    'bet_amount' => $participant->locked_tokens,
+                    'is_winner' => $participant->user_id === $winner->user_id
+                ]);
+            }
         }
 
         return [

@@ -371,3 +371,25 @@ Route::post('/test/invitation/{userId}', function ($userId) {
         'data' => $testInvitation
     ]);
 })->middleware('auth:sanctum');
+
+// ✅ DEBUG: Test WebSocket broadcasting
+Route::post('/test/websocket-broadcast/{roomCode}', function (string $roomCode) {
+    \Log::info('Testing WebSocket broadcast', ['room_code' => $roomCode]);
+    
+    broadcast(new \App\Events\CodebreakerGameUpdated(
+        $roomCode,
+        'test_broadcast',
+        auth()->id(),
+        [
+            'message' => 'This is a test WebSocket broadcast',
+            'timestamp' => now()->toISOString(),
+            'user_id' => auth()->id()
+        ]
+    ));
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Test broadcast sent',
+        'room_code' => $roomCode
+    ]);
+})->middleware(['auth:sanctum']);

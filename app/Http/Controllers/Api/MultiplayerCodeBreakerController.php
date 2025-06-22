@@ -149,7 +149,7 @@ class MultiplayerCodeBreakerController extends Controller
                             'attempts' => $p->game_progress['attempts'] ?? 0,
                             'status' => $p->status,
                             'score' => $p->score,
-                            'bet_amount' => $p->bet_amount
+                            'bet_amount' => $p->locked_tokens ?? 0
                         ];
                     })
             ]
@@ -219,100 +219,168 @@ class MultiplayerCodeBreakerController extends Controller
             'timestamp' => now()->toISOString()
         ];
 
-        // Calculate improved score based on attempts and time
-        $score = 0;
-        if ($isCorrect) {
-            // Base score for solving
-            $baseScore = 1000;
-            
-            // Bonus for fewer attempts (max 700 bonus, heavily weighted)
-            $attemptBonus = max(0, (8 - $attempts) * 100);
-            
-            // Time bonus (max 500 bonus for solving under 30 seconds, more generous for fast solvers)
-            $timeBonus = 0;
-            if ($timeTaken > 0) {
-                if ($timeTaken <= 30) {
-                    $timeBonus = 500; // Full bonus for very fast solvers
-                } elseif ($timeTaken <= 60) {
-                    $timeBonus = 400 - (($timeTaken - 30) * 10); // Linear decrease from 400 to 100
-                } elseif ($timeTaken <= 120) {
-                    $timeBonus = 100 - (($timeTaken - 60) * 1.67); // Linear decrease from 100 to 0
-                } else {
-                    $timeBonus = 0; // No time bonus for slow solvers
-                }
+        // ✅ FIX: Initialize score for all cases (ongoing games and finished games)
+        $score = $participant->score ?? 0; // Use current participant score for ongoing games
+        
+        if ($isCorrect || $attempts >= 7) {
+            if ($isCorrect) {
+                // Calculate score based on attempts and time
+                $score = max(0, 2000 - (($attempts - 1) * 200) - ($timeTaken * 0.5));
+                $score = round($score);
+                
+                $participant->markFinished($score);
+                
+                Log::info('Player marked as finished', [
+                    'room_code' => $room->room_code,
+                    'user_id' => Auth::id(),
+                    'player_name' => Auth::user()->name,
+                    'final_score' => $score,
+                    'participant_status' => $participant->fresh()->status,
+                    'is_solved' => true
+                ]);
+                
+                $participant->updateProgress([
+                    'attempts' => $attempts,
+                    'guesses' => $guesses,
+                    'is_solved' => true,
+                    'final_score' => $score,
+                    'completion_time' => $timeTaken,
+                    'finished_at' => now()->toISOString()
+                ]);
+
+                // Broadcast that this player broke the code
+                broadcast(new CodebreakerGameUpdated(
+                    $room->room_code,
+                    'code_broken',
+                    Auth::id(),
+                    [
+                        'player_broke_code' => true,
+                        'player_name' => Auth::user()->name,
+                        'player_score' => $score,
+                        'attempts_used' => count($guesses),
+                        'leaderboard' => $this->getRoomLeaderboard($room)
+                    ]
+                ));
+
+                Log::info('Player broke the code', [
+                    'room_code' => $room->room_code,
+                    'user_id' => Auth::id(),
+                    'player_name' => Auth::user()->name,
+                    'score' => $score,
+                    'attempts_used' => count($guesses)
+                ]);
+            } elseif ($attempts >= 7) {
+                // Out of attempts - small consolation score based on attempts made
+                $score = max(0, 100 - ($attempts * 10) - ($timeTaken * 0.1));
+                $score = round($score);
+                
+                $participant->markFinished($score);
+                
+                Log::info('Player finished - out of attempts', [
+                    'room_code' => $room->room_code,
+                    'user_id' => Auth::id(),
+                    'final_score' => $score,
+                    'participant_status' => $participant->fresh()->status,
+                    'attempts_used' => $attempts,
+                    'is_solved' => false
+                ]);
+                
+                $participant->updateProgress([
+                    'attempts' => $attempts,
+                    'guesses' => $guesses,
+                    'is_solved' => false,
+                    'final_score' => $score,
+                    'completion_time' => $timeTaken,
+                    'finished_at' => now()->toISOString()
+                ]);
             }
             
-            // Additional multiplier for perfect games (1 attempt)
-            $perfectBonus = ($attempts === 1) ? 300 : 0;
-            
-            $score = $baseScore + $attemptBonus + $timeBonus + $perfectBonus;
-            $score = round($score);
-            
-            $participant->markFinished($score);
-            
-            Log::info('Player marked as finished', [
+            // ✅ ADD: Handle betting when player finishes
+            $bettingResult = null;
+            if ($room->has_active_bets) {
+                try {
+                    $bettingResult = $this->bettingService->handleGameCompletion($room, $participant, $score);
+                    
+                    Log::info('Betting service result for completed player', [
+                        'room_code' => $room->room_code,
+                        'user_id' => Auth::id(),
+                        'betting_completed' => $bettingResult['completed'],
+                        'has_winner' => !is_null($bettingResult['winner']),
+                        'total_winnings' => $bettingResult['total_winnings']
+                    ]);
+                    
+                    // Update participant progress with betting results
+                    $currentProgress = $participant->game_progress ?? [];
+                    $currentProgress['betting_results'] = [
+                        'game_completed' => $bettingResult['completed'],
+                        'total_pot' => $room->total_bet_pool ?? 0,
+                        'tokens_won' => 0,
+                        'tokens_lost' => 0
+                    ];
+                    
+                    // If this player is the winner, record their winnings
+                    if ($bettingResult['winner'] && $bettingResult['winner']->user_id === Auth::id()) {
+                        $currentProgress['betting_results']['tokens_won'] = $bettingResult['total_winnings'];
+                    } else {
+                        // This player lost their bet - use locked_tokens not bet_amount
+                        $currentProgress['betting_results']['tokens_lost'] = $participant->locked_tokens ?? 0;
+                    }
+                    
+                    $participant->update(['game_progress' => $currentProgress]);
+                    
+                } catch (\Exception $e) {
+                    Log::error('Error handling codebreaker betting completion', [
+                        'room_code' => $room->room_code,
+                        'user_id' => Auth::id(),
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                }
+            }
+
+            // Check if all participants have finished
+            Log::info('Triggering game completion check', [
                 'room_code' => $room->room_code,
                 'user_id' => Auth::id(),
-                'player_name' => Auth::user()->name,
-                'final_score' => $score,
-                'participant_status' => $participant->fresh()->status,
-                'is_solved' => true
+                'trigger_reason' => $isCorrect ? 'player_solved' : ($attempts >= 7 ? 'player_out_of_attempts' : 'player_guess')
             ]);
             
-            // Store completion time
-            $participant->updateProgress([
-                'attempts' => $attempts,
-                'guesses' => $guesses,
-                'is_solved' => true,
-                'final_score' => $score,
-                'completion_time' => $timeTaken,
-                'finished_at' => now()->toISOString()
+            $this->checkGameCompletion($room);
+            
+            Log::info('Game completion check completed', [
+                'room_code' => $room->room_code,
+                'current_room_status' => $room->fresh()->status
             ]);
 
-            // Broadcast that this player broke the code
+            // Broadcast game update via WebSocket
             broadcast(new CodebreakerGameUpdated(
                 $room->room_code,
-                'code_broken',
+                'guess_made',
                 Auth::id(),
                 [
-                    'player_broke_code' => true,
-                    'player_name' => Auth::user()->name,
-                    'player_score' => $score,
-                    'attempts_used' => count($guesses),
+                    'guess' => $guess,
+                    'feedback' => $feedback,
+                    'is_correct' => $isCorrect,
+                    'attempts_remaining' => 7 - $attempts,
+                    'attempt' => $attempts,
+                    'score' => $score,
+                    'game_finished' => $isCorrect || $attempts >= 7,
                     'leaderboard' => $this->getRoomLeaderboard($room)
                 ]
             ));
 
-            Log::info('Player broke the code', [
-                'room_code' => $room->room_code,
-                'user_id' => Auth::id(),
-                'player_name' => Auth::user()->name,
-                'score' => $score,
-                'attempts_used' => count($guesses)
-            ]);
-        } elseif ($attempts >= 7) {
-            // Out of attempts - small consolation score based on attempts made
-            $score = max(0, 100 - ($attempts * 10) - ($timeTaken * 0.1));
-            $score = round($score);
-            
-            $participant->markFinished($score);
-            
-            Log::info('Player finished - out of attempts', [
-                'room_code' => $room->room_code,
-                'user_id' => Auth::id(),
-                'final_score' => $score,
-                'participant_status' => $participant->fresh()->status,
-                'attempts_used' => $attempts,
-                'is_solved' => false
-            ]);
-            
-            $participant->updateProgress([
-                'attempts' => $attempts,
-                'guesses' => $guesses,
-                'is_solved' => false,
-                'final_score' => $score,
-                'completion_time' => $timeTaken,
-                'finished_at' => now()->toISOString()
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'guess' => $guess,
+                    'feedback' => $feedback,
+                    'is_correct' => $isCorrect,
+                    'attempts_remaining' => 7 - $attempts,
+                    'attempt' => $attempts,
+                    'score' => $score,
+                    'game_finished' => $isCorrect || $attempts >= 7,
+                    'leaderboard' => $this->getRoomLeaderboard($room)
+                ]
             ]);
         } else {
             // Update progress for ongoing game
@@ -321,52 +389,38 @@ class MultiplayerCodeBreakerController extends Controller
                 'guesses' => $guesses,
                 'current_time' => $timeTaken
             ]);
+
+            // Broadcast game update via WebSocket
+            broadcast(new CodebreakerGameUpdated(
+                $room->room_code,
+                'guess_made',
+                Auth::id(),
+                [
+                    'guess' => $guess,
+                    'feedback' => $feedback,
+                    'is_correct' => $isCorrect,
+                    'attempts_remaining' => 7 - $attempts,
+                    'attempt' => $attempts,
+                    'score' => $score,
+                    'game_finished' => $isCorrect || $attempts >= 7,
+                    'leaderboard' => $this->getRoomLeaderboard($room)
+                ]
+            ));
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'guess' => $guess,
+                    'feedback' => $feedback,
+                    'is_correct' => $isCorrect,
+                    'attempts_remaining' => 7 - $attempts,
+                    'attempt' => $attempts,
+                    'score' => $score,
+                    'game_finished' => $isCorrect || $attempts >= 7,
+                    'leaderboard' => $this->getRoomLeaderboard($room)
+                ]
+            ]);
         }
-
-        // Check if all participants have finished
-        Log::info('Triggering game completion check', [
-            'room_code' => $room->room_code,
-            'user_id' => Auth::id(),
-            'trigger_reason' => $isCorrect ? 'player_solved' : ($attempts >= 7 ? 'player_out_of_attempts' : 'player_guess')
-        ]);
-        
-        $this->checkGameCompletion($room);
-        
-        Log::info('Game completion check completed', [
-            'room_code' => $room->room_code,
-            'current_room_status' => $room->fresh()->status
-        ]);
-
-        // Broadcast game update via WebSocket
-        broadcast(new CodebreakerGameUpdated(
-            $room->room_code,
-            'guess_made',
-            Auth::id(),
-            [
-                'guess' => $guess,
-                'feedback' => $feedback,
-                'is_correct' => $isCorrect,
-                'attempts_remaining' => 7 - $attempts,
-                'attempt' => $attempts,
-                'score' => $score,
-                'game_finished' => $isCorrect || $attempts >= 7,
-                'leaderboard' => $this->getRoomLeaderboard($room)
-            ]
-        ));
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'guess' => $guess,
-                'feedback' => $feedback,
-                'is_correct' => $isCorrect,
-                'attempts_remaining' => 7 - $attempts,
-                'attempt' => $attempts,
-                'score' => $score,
-                'game_finished' => $isCorrect || $attempts >= 7,
-                'leaderboard' => $this->getRoomLeaderboard($room)
-            ]
-        ]);
     }
 
     /**
@@ -416,6 +470,41 @@ class MultiplayerCodeBreakerController extends Controller
             'attempts_made' => $attempts,
             'final_score' => $score
         ]);
+
+        // ✅ ADD: Handle betting when player forfeits
+        $bettingResult = null;
+        if ($room->has_active_bets) {
+            try {
+                $bettingResult = $this->bettingService->handleGameCompletion($room, $participant, $score);
+                
+                Log::info('Betting service result for forfeited player', [
+                    'room_code' => $room->room_code,
+                    'user_id' => Auth::id(),
+                    'betting_completed' => $bettingResult['completed'],
+                    'has_winner' => !is_null($bettingResult['winner']),
+                    'total_winnings' => $bettingResult['total_winnings']
+                ]);
+                
+                // Update participant progress with betting results
+                $currentProgress = $participant->game_progress ?? [];
+                $currentProgress['betting_results'] = [
+                    'game_completed' => $bettingResult['completed'],
+                    'total_pot' => $room->total_bet_pool ?? 0,
+                    'tokens_won' => 0,
+                    'tokens_lost' => $participant->locked_tokens ?? 0 // Forfeited players lose their bet
+                ];
+                
+                $participant->update(['game_progress' => $currentProgress]);
+                
+            } catch (\Exception $e) {
+                Log::error('Error handling codebreaker betting forfeit', [
+                    'room_code' => $room->room_code,
+                    'user_id' => Auth::id(),
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+            }
+        }
 
         // Check if all participants have finished
         $this->checkGameCompletion($room);
@@ -552,10 +641,10 @@ class MultiplayerCodeBreakerController extends Controller
 
                 // Generate battle history
                 $responseData['battle_history'] = $this->generateBattleHistory($room, $leaderboard);
-            }
+        }
 
-            return response()->json([
-                'success' => true,
+        return response()->json([
+            'success' => true,
                 'data' => $responseData
             ]);
 
@@ -661,7 +750,7 @@ class MultiplayerCodeBreakerController extends Controller
                     'attempts' => $progress['attempts'] ?? 0,
                     'status' => $participant->status,
                     'is_solved' => $progress['is_solved'] ?? false,
-                    'bet_amount' => $participant->bet_amount,
+                    'bet_amount' => $participant->locked_tokens ?? 0,
                     'time_taken' => $this->formatTime($progress['completion_time'] ?? $progress['current_time'] ?? 0),
                     'finished_at' => $participant->finished_at?->toISOString()
                 ];
@@ -759,69 +848,18 @@ class MultiplayerCodeBreakerController extends Controller
      */
     private function checkGameCompletion(MultiplayerRoom $room)
     {
-        // Get all active participants (excluding invited ones)
-        $participants = $room->participants()->where('status', '!=', 'invited')->get();
+        // Refresh room data to check current status
+        $room = $room->fresh();
         
-        if ($participants->count() === 0) {
-            return; // No participants to check
-        }
-
-        // Count finished participants using multiple criteria
-        $finishedParticipants = $participants->filter(function ($participant) {
-            // Check if participant is marked as finished
-            if ($participant->status === 'finished' || $participant->completed_game) {
-                return true;
-            }
-            
-            // Check progress data for completion indicators
-            $progress = $participant->game_progress ?? [];
-            
-            // Player finished if they solved the code
-            if (isset($progress['is_solved']) && $progress['is_solved']) {
-                return true;
-            }
-            
-            // Player finished if they used all attempts (7 attempts max)
-            if (isset($progress['attempts']) && $progress['attempts'] >= 7) {
-                return true;
-            }
-            
-            // Player finished if they have a finished_at timestamp
-            if (isset($progress['finished_at']) || $participant->finished_at) {
-                return true;
-            }
-            
-            return false;
-        });
-
-        $totalParticipants = $participants->count();
-        $finishedCount = $finishedParticipants->count();
-        
-        Log::info('Checking game completion', [
-            'room_code' => $room->room_code,
-            'total_participants' => $totalParticipants,
-            'finished_participants' => $finishedCount,
-            'participant_statuses' => $participants->pluck('status', 'user_id')->toArray()
-        ]);
-
-        // Only complete the game when ALL participants have finished
-        if ($finishedCount === $totalParticipants) {
-            Log::info('All participants finished, completing game', [
+        // If betting service already completed the game, just handle broadcasting
+        if ($room->status === 'completed') {
+            Log::info('Room already completed by betting service', [
                 'room_code' => $room->room_code,
-                'total_participants' => $totalParticipants,
-                'finished_participants' => $finishedCount
+                'room_status' => $room->status
             ]);
-
-            // Get final leaderboard before updating room status
-            $finalLeaderboard = $this->getRoomLeaderboard($room);
             
-            // Save final scores to preserve bet amounts and rankings
-            $room->update([
-                'status' => 'completed',
-                'final_scores' => $finalLeaderboard
-            ]);
-
-            // Convert to collection for consistent data handling
+            // Get final leaderboard
+            $finalLeaderboard = $this->getRoomLeaderboard($room);
             $leaderboard = collect($finalLeaderboard);
             
             // Determine winner (highest ranked player)
@@ -830,13 +868,17 @@ class MultiplayerCodeBreakerController extends Controller
             // Generate battle history
             $battleHistory = $this->generateBattleHistory($room, $leaderboard);
 
-            // Broadcast game completion with winner information and battle history
+            // Calculate total pot
+            $totalPot = $this->calculateTotalPot($room);
+
+            // Broadcast game completion
             broadcast(new CodebreakerGameUpdated(
                 $room->room_code,
                 'game_completed',
                 null,
                 [
                     'game_completed' => true,
+                    'room_status' => 'completed',
                     'winner' => $winner ? [
                         'username' => $winner['username'],
                         'user_id' => $winner['user_id'] ?? null,
@@ -847,15 +889,95 @@ class MultiplayerCodeBreakerController extends Controller
                     ] : null,
                     'final_leaderboard' => $leaderboard->toArray(),
                     'battle_history' => $battleHistory,
-                    'total_pot' => $this->calculateTotalPot($room)
+                    'total_pot' => $totalPot
+                ]
+            ));
+
+            Log::info('Game completion broadcast sent for betting-completed room', [
+                'room_code' => $room->room_code,
+                'winner' => $winner ? $winner['username'] : 'None',
+                'total_pot' => $totalPot
+            ]);
+            
+            return; // Exit early since betting service handled completion
+        }
+        
+        // Original logic for non-betting games or if betting service hasn't completed yet
+        $participants = $room->participants()->where('status', '!=', 'invited')->get();
+        $totalParticipants = $participants->count();
+        $finishedCount = $participants->where('status', 'finished')->count();
+        
+        Log::info('Checking game completion', [
+            'room_code' => $room->room_code,
+            'total_participants' => $totalParticipants,
+            'finished_participants' => $finishedCount,
+            'participants_status' => $participants->pluck('status', 'user_id')->toArray(),
+            'has_active_bets' => $room->has_active_bets ?? false
+        ]);
+
+        if ($finishedCount === $totalParticipants) {
+            Log::info('All participants finished, completing game', [
+                'room_code' => $room->room_code,
+                'total_participants' => $totalParticipants,
+                'finished_participants' => $finishedCount
+            ]);
+
+            // Get final leaderboard before updating room status
+            $finalLeaderboard = $this->getRoomLeaderboard($room);
+            
+            // ✅ FIX: Update room status FIRST, then broadcast (only for non-betting games)
+            if (!$room->has_active_bets) {
+                $room->update([
+                    'status' => 'completed',
+                    'final_scores' => $finalLeaderboard
+                ]);
+                
+                // Refresh room instance to ensure status is updated
+                $room = $room->fresh();
+            }
+
+            // Convert to collection for consistent data handling
+            $leaderboard = collect($finalLeaderboard);
+            
+            // Determine winner (highest ranked player)
+            $winner = $leaderboard->isNotEmpty() ? $leaderboard->first() : null;
+
+            // Generate battle history
+            $battleHistory = $this->generateBattleHistory($room, $leaderboard);
+
+            // Calculate total pot
+            $totalPot = $this->calculateTotalPot($room);
+
+            // ✅ FIX: Broadcast game completion AFTER room status is updated
+            broadcast(new CodebreakerGameUpdated(
+                $room->room_code,
+                'game_completed',
+                null,
+                [
+                    'game_completed' => true,
+                    'room_status' => $room->status,
+                    'winner' => $winner ? [
+                        'username' => $winner['username'],
+                        'user_id' => $winner['user_id'] ?? null,
+                        'score' => $winner['score'],
+                        'rank' => $winner['rank'],
+                        'is_solved' => $winner['is_solved'],
+                        'completion_time' => $winner['time_taken']
+                    ] : null,
+                    'final_leaderboard' => $leaderboard->toArray(),
+                    'battle_history' => $battleHistory,
+                    'total_pot' => $totalPot
                 ]
             ));
 
             Log::info('Game completion broadcast sent', [
                 'room_code' => $room->room_code,
+                'room_status' => $room->status,
                 'winner' => $winner ? $winner['username'] : 'None',
                 'leaderboard_count' => $leaderboard->count(),
-                'battle_history_count' => is_array($battleHistory) ? count($battleHistory) : 0
+                'battle_history_count' => is_array($battleHistory) ? count($battleHistory) : 0,
+                'total_pot' => $totalPot,
+                'handled_by_betting_service' => $room->has_active_bets ?? false
             ]);
         } else {
             Log::info('Game still in progress', [
@@ -872,8 +994,8 @@ class MultiplayerCodeBreakerController extends Controller
      */
     private function calculateTotalPot(MultiplayerRoom $room)
     {
-        $participants = $room->participants()->where('status', '!=', 'invited')->get();
-        return $participants->sum('bet_amount') + ($participants->count() * $room->entry_fee);
+        $participants = $room->participants;
+        return $participants->sum('locked_tokens') + ($participants->count() * $room->entry_fee);
     }
 
     private function checkForInactivePlayers(MultiplayerRoom $room): void

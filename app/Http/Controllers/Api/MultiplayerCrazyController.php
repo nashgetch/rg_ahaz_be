@@ -443,16 +443,15 @@ class MultiplayerCrazyController extends Controller
 
         $gameState['players'][$playerIndex]['said_qeregn'] = true;
         
-        // CRITICAL: Reset suit change restriction when Qeregn is declared
-        // Qeregn is a significant game event that should clear suit change blocking
-        if (isset($gameState['last_suit_change'])) {
-            unset($gameState['last_suit_change']);
-            \Log::info('Qeregn declared - suit change restriction reset', [
-                'player_index' => $playerIndex,
-                'player_name' => $gameState['players'][$playerIndex]['username'],
-                'reason' => 'qeregn_declaration_resets_suit_change_restriction'
-            ]);
-        }
+        // CRITICAL: Qeregn declaration should NOT clear suit change restrictions
+        // Rule: If the immediate next player after an 8/J suit change declares Qeregn,
+        // they still cannot change suit with their 8/J cards - the restriction remains
+        \Log::info('Qeregn declared - suit change restriction preserved', [
+            'player_index' => $playerIndex,
+            'player_name' => $gameState['players'][$playerIndex]['username'],
+            'has_suit_change_restriction' => isset($gameState['last_suit_change']),
+            'rule' => 'Qeregn declaration does not bypass 8/J suit change blocking rules'
+        ]);
         
         // Add notification for all players
         $playerName = $gameState['players'][$playerIndex]['username'];
@@ -2203,6 +2202,17 @@ class MultiplayerCrazyController extends Controller
                             // Two players: 5 brings turn back to same player
                             $gameState['current_player'] = $playerIndex;
                             
+                            // CRITICAL: Clear suit change restriction when turn comes back in two-player scenario
+                            // Rule: When 5 brings turn back to same player, they can change suits with 8/J
+                            if (isset($gameState['last_suit_change'])) {
+                                unset($gameState['last_suit_change']);
+                                \Log::info('Suit change restriction cleared - 5 card brought turn back in two-player game', [
+                                    'player_index' => $playerIndex,
+                                    'player_name' => $gameState['players'][$playerIndex]['username'],
+                                    'rule' => 'In two-player mode, when 5 brings turn back to same player, suit change restriction is lifted'
+                                ]);
+                            }
+                            
                             $playerName = $gameState['players'][$playerIndex]['username'];
                             $gameState['last_notification'] = [
                                 'type' => 'turn_rotation',
@@ -2250,6 +2260,17 @@ class MultiplayerCrazyController extends Controller
                             // Two players: 7 brings turn back to same player
                             $gameState['current_player'] = $playerIndex;
                             $gameState['current_suit'] = $card['suit'];
+                            
+                            // CRITICAL: Clear suit change restriction when turn comes back in two-player scenario
+                            // Rule: When 7 brings turn back to same player, they can change suits with 8/J
+                            if (isset($gameState['last_suit_change'])) {
+                                unset($gameState['last_suit_change']);
+                                \Log::info('Suit change restriction cleared - 7 card brought turn back in two-player game', [
+                                    'player_index' => $playerIndex,
+                                    'player_name' => $gameState['players'][$playerIndex]['username'],
+                                    'rule' => 'In two-player mode, when 7 brings turn back to same player, suit change restriction is lifted'
+                                ]);
+                            }
                             
                             $playerName = $gameState['players'][$playerIndex]['username'];
                             $skippedPlayerName = $gameState['players'][$this->crazyService->getNextPlayer(
