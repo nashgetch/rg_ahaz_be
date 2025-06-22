@@ -106,7 +106,7 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
             return [
                 'question_id' => $question->question_id,
                 'question' => $question->question,
-                'options' => $question->options, // Already an array from cast
+                'options' => json_encode($question->options), // Convert array back to JSON string
                 'correct_answer' => $question->correct_answer,
                 'category' => $question->category,
                 'difficulty' => $question->difficulty,
