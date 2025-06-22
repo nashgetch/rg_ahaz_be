@@ -10,13 +10,65 @@ use Illuminate\Support\Facades\DB;
 class ComprehensiveGeoQuestionSeeder extends Seeder
 {
     /**
+     * Safe info output that works in all contexts
+     */
+    private function info(string $message): void
+    {
+        if (isset($this->command) && method_exists($this->command, 'info')) {
+            $this->command->info($message);
+        } else {
+            echo $message . PHP_EOL;
+        }
+    }
+
+    /**
+     * Safe warning output that works in all contexts
+     */
+    private function warn(string $message): void
+    {
+        if (isset($this->command) && method_exists($this->command, 'warn')) {
+            $this->command->warn($message);
+        } else {
+            echo "WARNING: " . $message . PHP_EOL;
+        }
+    }
+
+    /**
+     * Safe error output that works in all contexts
+     */
+    private function error(string $message): void
+    {
+        if (isset($this->command) && method_exists($this->command, 'error')) {
+            $this->command->error($message);
+        } else {
+            echo "ERROR: " . $message . PHP_EOL;
+        }
+    }
+
+    /**
+     * Safe table output that works in all contexts
+     */
+    private function table(array $headers, array $data): void
+    {
+        if (isset($this->command) && method_exists($this->command, 'table')) {
+            $this->command->table($headers, $data);
+        } else {
+            // Simple text table fallback
+            echo implode(' | ', $headers) . PHP_EOL;
+            echo str_repeat('-', 50) . PHP_EOL;
+            foreach ($data as $row) {
+                echo implode(' | ', $row) . PHP_EOL;
+            }
+        }
+    }
+    /**
      * Run the database seeds - Insert JSON data as-is with maximum randomization
      */
     public function run(): void
     {
-        $this->command->info('🌍 Comprehensive Question Seeder (No Validation)');
-        $this->command->info('===============================================');
-        $this->command->info('📊 Target: Insert all JSON data as-is with maximum randomization');
+        $this->info('🌍 Comprehensive Question Seeder (No Validation)');
+        $this->info('===============================================');
+        $this->info('📊 Target: Insert all JSON data as-is with maximum randomization');
         
         // Step 1: Read existing questions from database
         $existingQuestions = $this->getExistingQuestions();
@@ -39,13 +91,13 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
      */
     private function getExistingQuestions(): array
     {
-        $this->command->info('📖 Reading existing questions from database...');
+        $this->info('📖 Reading existing questions from database...');
         
         $existingCount = GeoQuestion::count();
-        $this->command->info("Found {$existingCount} existing questions in database");
+        $this->info("Found {$existingCount} existing questions in database");
         
         if ($existingCount === 0) {
-            $this->command->warn('⚠️  No existing questions found in database!');
+            $this->warn('⚠️  No existing questions found in database!');
             return [];
         }
         
@@ -67,7 +119,7 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
             ];
         })->toArray();
         
-        $this->command->info("✅ Loaded {$existingCount} existing questions");
+        $this->info("✅ Loaded {$existingCount} existing questions");
         return $questions;
     }
 
@@ -76,17 +128,17 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
      */
     private function readNewQuestions(): array
     {
-        $this->command->info('📄 Reading new questions from JSON file...');
+        $this->info('📄 Reading new questions from JSON file...');
         
         $jsonPath = storage_path('app/trivia_5000_questions.json');
         
         if (!File::exists($jsonPath)) {
-            $this->command->error("❌ JSON file not found at: {$jsonPath}");
-            $this->command->info("Please ensure the file is placed at: backend/storage/app/trivia_5000_questions.json");
+            $this->error("❌ JSON file not found at: {$jsonPath}");
+            $this->info("Please ensure the file is placed at: backend/storage/app/trivia_5000_questions.json");
             throw new \Exception("JSON file not found");
         }
         
-        $this->command->info("📍 Reading from: {$jsonPath}");
+        $this->info("📍 Reading from: {$jsonPath}");
         
         try {
             $jsonContent = File::get($jsonPath);
@@ -96,12 +148,12 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
                 throw new \Exception("Invalid JSON format");
             }
             
-            $this->command->info("Found " . count($questionsData) . " questions in JSON file");
+                        $this->info("Found " . count($questionsData) . " questions in JSON file");
             
-                                                   // Prepare questions without validation - insert as-is
-             $newQuestions = [];
-             
-             foreach ($questionsData as $questionData) {
+            // Prepare questions without validation - insert as-is
+            $newQuestions = [];
+            
+            foreach ($questionsData as $questionData) {
                  $newQuestions[] = [
                      'question_id' => $questionData['id'],
                      'question' => $questionData['question'],
@@ -118,11 +170,11 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
                  ];
              }
              
-             $this->command->info("✅ Loaded " . count($newQuestions) . " questions from JSON (no validation)");
-             return $newQuestions;
+                         $this->info("✅ Loaded " . count($newQuestions) . " questions from JSON (no validation)");
+            return $newQuestions;
             
         } catch (\Exception $e) {
-            $this->command->error("❌ Error reading JSON file: " . $e->getMessage());
+            $this->error("❌ Error reading JSON file: " . $e->getMessage());
             throw $e;
         }
     }
@@ -134,13 +186,13 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
      */
     private function mergeAndRandomizeQuestions(array $existingQuestions, array $newQuestions): array
     {
-        $this->command->info('🔀 Merging and randomizing questions...');
+        $this->info('🔀 Merging and randomizing questions...');
         
         // Combine all questions
         $allQuestions = array_merge($existingQuestions, $newQuestions);
         $totalCount = count($allQuestions);
         
-        $this->command->info("📊 Total questions to process: {$totalCount}");
+        $this->info("📊 Total questions to process: {$totalCount}");
         
         // Remove duplicate question IDs (prioritize existing questions)
         $uniqueQuestions = [];
@@ -158,14 +210,14 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
         }
         
         if ($duplicateCount > 0) {
-            $this->command->warn("⚠️  Removed {$duplicateCount} duplicate questions");
+            $this->warn("⚠️  Removed {$duplicateCount} duplicate questions");
         }
         
         $uniqueCount = count($uniqueQuestions);
-        $this->command->info("✅ Unique questions: {$uniqueCount}");
+        $this->info("✅ Unique questions: {$uniqueCount}");
         
         // MAXIMUM RANDOMIZATION - multiple shuffle stages
-        $this->command->info('🎲 Applying maximum randomization to insertion order...');
+        $this->info('🎲 Applying maximum randomization to insertion order...');
         
         // Stage 1: Initial shuffle
         shuffle($uniqueQuestions);
@@ -200,8 +252,8 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
         // Stage 5: Final shuffle to guarantee maximum randomness
         shuffle($randomizedQuestions);
         
-        $this->command->info("🔀 Maximum randomization applied - questions ready for insertion");
-        $this->command->info("🎯 Final order is completely random and unpredictable");
+        $this->info("🔀 Maximum randomization applied - questions ready for insertion");
+        $this->info("🎯 Final order is completely random and unpredictable");
         
         return $randomizedQuestions;
     }
@@ -211,7 +263,7 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
      */
     private function insertRandomizedQuestions(array $questions): void
     {
-        $this->command->info('🗑️  Clearing existing questions...');
+        $this->info('🗑️  Clearing existing questions...');
         
         DB::beginTransaction();
         
@@ -219,18 +271,13 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
             // Clear existing questions
             GeoQuestion::truncate();
             
-            $this->command->info('📥 Inserting randomized questions...');
+            $this->info('📥 Inserting randomized questions...');
             
             // Insert in chunks for better performance
             $chunks = array_chunk($questions, 100);
             $totalChunks = count($chunks);
             
-            // Create progress bar only if command is available
-            $progressBar = null;
-            if (isset($this->command) && $this->command->output) {
-                $progressBar = $this->command->output->createProgressBar($totalChunks);
-            }
-            
+            // Insert chunks with simple progress messages
             foreach ($chunks as $index => $chunk) {
                 // Remove the 'source' field before insertion
                 $cleanChunk = array_map(function ($question) {
@@ -240,28 +287,19 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
                 
                 GeoQuestion::insert($cleanChunk);
                 
-                if ($progressBar) {
-                    $progressBar->advance();
-                } else {
-                    // Show progress without progress bar
-                    $current = $index + 1;
-                    $this->command->info("Inserted chunk {$current}/{$totalChunks}");
-                }
-            }
-            
-            if ($progressBar) {
-                $progressBar->finish();
-                $this->command->newLine();
+                // Show progress
+                $current = $index + 1;
+                $this->info("Inserted chunk {$current}/{$totalChunks}");
             }
             
             DB::commit();
             
             $insertedCount = count($questions);
-            $this->command->info("✅ Successfully inserted {$insertedCount} randomized questions!");
+            $this->info("✅ Successfully inserted {$insertedCount} randomized questions!");
             
         } catch (\Exception $e) {
             DB::rollback();
-            $this->command->error("❌ Error during insertion: " . $e->getMessage());
+            $this->error("❌ Error during insertion: " . $e->getMessage());
             throw $e;
         }
     }
@@ -271,7 +309,7 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
      */
     private function displayFinalStatistics(): void
     {
-        $this->command->info('📊 === FINAL STATISTICS ===');
+        $this->info('📊 === FINAL STATISTICS ===');
         
         $totalCount = GeoQuestion::count();
         
@@ -310,10 +348,10 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
             $tableData[] = [ucfirst($difficulty), $count, $percentage];
         }
         
-        $this->command->table(['Metric', 'Count', 'Percentage'], $tableData);
+        $this->table(['Metric', 'Count', 'Percentage'], $tableData);
         
-        $this->command->info('🎉 Database now contains ' . $totalCount . ' randomized questions!');
-        $this->command->info('🔀 All questions inserted in completely random order (no validation applied)');
-        $this->command->info('🎮 Ready for endless gameplay with maximum variety!');
+        $this->info('🎉 Database now contains ' . $totalCount . ' randomized questions!');
+        $this->info('🔀 All questions inserted in completely random order (no validation applied)');
+        $this->info('🎮 Ready for endless gameplay with maximum variety!');
     }
 } 
