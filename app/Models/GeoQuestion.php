@@ -119,106 +119,284 @@ class GeoQuestion extends Model
     }
 
     /**
-     * Get enhanced varied questions with exclusions and maximum randomization
+     * Get ultra-random questions with massive pool and extreme randomization
+     */
+    public static function getUltraRandomQuestions($count = 10, $excludeIds = [])
+    {
+        // EXTREME randomization with multiple entropy sources
+        $microtime = (int)(microtime(true) * 1000000);
+        $ultraSeed = $microtime + rand(1, 1000000) + count($excludeIds) * 7919;
+        srand($ultraSeed);
+        mt_srand($ultraSeed + rand(1, 50000));
+        
+        // Get MASSIVE candidate pool (up to entire database for ultra variety)
+        $maxPoolSize = min(6000, self::active()->count()); // Nearly entire database
+        
+        // Multiple query passes with different ORDER BY strategies
+        $queryStrategies = [
+            'random' => function ($query) { return $query->inRandomOrder(); },
+            'id_desc' => function ($query) { return $query->orderBy('id', 'DESC'); },
+            'id_asc' => function ($query) { return $query->orderBy('id', 'ASC'); },
+            'category' => function ($query) { return $query->orderBy('category', 'ASC')->inRandomOrder(); },
+            'difficulty' => function ($query) { return $query->orderBy('difficulty', 'DESC')->inRandomOrder(); },
+        ];
+        
+        $strategyName = array_rand($queryStrategies);
+        $strategy = $queryStrategies[$strategyName];
+        
+        $candidates = self::active()
+            ->when(!empty($excludeIds), function ($query) use ($excludeIds) {
+                $query->whereNotIn('question_id', $excludeIds);
+            })
+            ->when(true, $strategy)
+            ->limit($maxPoolSize)
+            ->get();
+        
+        if ($candidates->isEmpty()) {
+            return collect();
+        }
+        
+        // EXTREME randomization layers
+        for ($layer = 0; $layer < rand(7, 15); $layer++) {
+            $candidates = $candidates->shuffle();
+            
+            // Apply different sorting algorithms randomly
+            switch (rand(1, 4)) {
+                case 1:
+                    $candidates = $candidates->sortBy(function () { return rand(1, 999999); })->values();
+                    break;
+                case 2:
+                    $candidates = $candidates->reverse();
+                    break;
+                case 3:
+                    $candidates = $candidates->chunk(rand(50, 200))->shuffle()->flatten();
+                    break;
+                default:
+                    $candidates = $candidates->shuffle();
+            }
+        }
+        
+        // Random selection with multiple offset strategies
+        $offsetStrategies = [
+            'start' => 0,
+            'middle' => max(0, intval($candidates->count() / 2) - intval($count / 2)),
+            'end' => max(0, $candidates->count() - $count),
+            'random' => rand(0, max(0, $candidates->count() - $count)),
+            'quarter' => max(0, intval($candidates->count() / 4)),
+            'three_quarter' => max(0, intval($candidates->count() * 3 / 4) - $count),
+        ];
+        
+        $offsetStrategy = array_rand($offsetStrategies);
+        $offset = $offsetStrategies[$offsetStrategy];
+        
+        $selected = $candidates->skip($offset)->take($count);
+        
+        // Final ultra-randomization
+        for ($final = 0; $final < rand(5, 12); $final++) {
+            $selected = $selected->shuffle();
+        }
+        
+        return $selected;
+    }
+
+    /**
+     * Get ultra-randomized questions with maximum variety and deep randomization
      */
     public static function getEnhancedVariedQuestions($count = 10, $excludeIds = [])
     {
-        // Use time-based randomization seed for more variety across sessions
-        $randomSeed = time() + rand(1, 1000);
+        // ULTRA-RANDOMIZATION: Multiple entropy sources
+        $microtime = (int)(microtime(true) * 1000000);
+        $randomSeed = $microtime + rand(1, 100000) + count($excludeIds) * 1337;
         srand($randomSeed);
+        mt_srand($randomSeed);
         
-        // Get all available categories dynamically
-        $categories = self::active()
-            ->select('category')
-            ->distinct()
-            ->pluck('category')
-            ->toArray();
+        // Get MASSIVE pool for maximum variety (10x larger than needed)
+        $poolMultiplier = max(10, 50 - (count($excludeIds) / 100)); // Larger pool if fewer exclusions
+        $poolSize = min($count * $poolMultiplier, 5000); // Up to 5000 questions in pool
         
-        if (empty($categories)) {
-            return self::getRandomQuestionsExcluding($count, $excludeIds);
-        }
-        
-        // Shuffle categories for random order
-        shuffle($categories);
-        
-        $difficulties = ['easy', 'medium', 'hard'];
-        shuffle($difficulties); // Randomize difficulty order too
-        
-        // More random distribution - vary weights per session
-        $randomDistributions = [
-            ['easy' => 0.5, 'medium' => 0.3, 'hard' => 0.2],
-            ['easy' => 0.3, 'medium' => 0.5, 'hard' => 0.2],
-            ['easy' => 0.4, 'medium' => 0.4, 'hard' => 0.2],
-            ['easy' => 0.6, 'medium' => 0.2, 'hard' => 0.2],
-            ['easy' => 0.2, 'medium' => 0.6, 'hard' => 0.2],
-        ];
-        $difficultyWeights = $randomDistributions[array_rand($randomDistributions)];
-        
-        // Collect questions with maximum randomization
-        $allCandidates = self::active()
+        // Get ultra-random base pool using multiple ORDER BY RAND() calls
+        $basePool = self::active()
             ->when(!empty($excludeIds), function ($query) use ($excludeIds) {
                 $query->whereNotIn('question_id', $excludeIds);
             })
             ->inRandomOrder()
+            ->limit($poolSize)
             ->get();
         
-        // Group by category and difficulty for variety
-        $groupedQuestions = $allCandidates->groupBy(function ($question) {
-            return $question->category . '_' . $question->difficulty;
-        });
+        if ($basePool->isEmpty()) {
+            return collect();
+        }
+        
+        // Apply MULTIPLE layers of randomization
+        for ($layer = 0; $layer < 5; $layer++) {
+            $basePool = $basePool->shuffle();
+        }
+        
+        // Get all categories and apply session-specific randomization
+        $categories = $basePool->pluck('category')->unique()->toArray();
+        shuffle($categories);
+        
+        // ULTRA-RANDOM category selection strategy
+        $strategies = [
+            'balanced',     // Balanced across categories
+            'weighted',     // Random weights per category  
+            'clustered',    // Focus on 3-4 categories
+            'scattered',    // Maximum variety
+            'random'        // Completely random
+        ];
+        $strategy = $strategies[array_rand($strategies)];
         
         $selectedQuestions = collect();
-        $categoryCounts = array_fill_keys($categories, 0);
-        $targetPerCategory = ceil($count / count($categories));
         
-        // Multiple passes for maximum randomization
-        for ($pass = 0; $pass < 3 && $selectedQuestions->count() < $count; $pass++) {
-            foreach ($categories as $category) {
-                if ($selectedQuestions->count() >= $count) break;
-                if ($categoryCounts[$category] >= $targetPerCategory) continue;
+        switch ($strategy) {
+            case 'balanced':
+                $selectedQuestions = self::selectBalanced($basePool, $count, $categories);
+                break;
                 
-                // Randomly select difficulty for this category
-                $difficulty = $difficulties[array_rand($difficulties)];
-                $groupKey = $category . '_' . $difficulty;
+            case 'weighted':
+                $selectedQuestions = self::selectWeighted($basePool, $count, $categories);
+                break;
                 
-                if (isset($groupedQuestions[$groupKey]) && $groupedQuestions[$groupKey]->isNotEmpty()) {
-                    // Take random question from this group
-                    $question = $groupedQuestions[$groupKey]->random();
-                    
-                    // Avoid duplicates
-                    if (!$selectedQuestions->contains('question_id', $question->question_id)) {
-                        $selectedQuestions->push($question);
-                        $categoryCounts[$category]++;
-                        
-                        // Remove from pool to avoid re-selection
-                        $groupedQuestions[$groupKey] = $groupedQuestions[$groupKey]
-                            ->reject(function ($q) use ($question) {
-                                return $q->question_id === $question->question_id;
-                            });
-                    }
-                }
-            }
+            case 'clustered':
+                $selectedQuestions = self::selectClustered($basePool, $count, $categories);
+                break;
+                
+            case 'scattered':
+                $selectedQuestions = self::selectScattered($basePool, $count, $categories);
+                break;
+                
+            default: // 'random'
+                $selectedQuestions = self::selectPureRandom($basePool, $count);
         }
         
-        // Fill remaining slots with completely random questions if needed
-        while ($selectedQuestions->count() < $count && $allCandidates->isNotEmpty()) {
-            $randomQuestion = $allCandidates->random();
-            
-            if (!$selectedQuestions->contains('question_id', $randomQuestion->question_id)) {
-                $selectedQuestions->push($randomQuestion);
-            }
-            
-            $allCandidates = $allCandidates->reject(function ($q) use ($randomQuestion) {
-                return $q->question_id === $randomQuestion->question_id;
-            });
-        }
-        
-        // Multiple shuffles for maximum randomness
+        // Apply FINAL randomization layers
         $result = $selectedQuestions->shuffle();
-        for ($i = 0; $i < 3; $i++) {
-            $result = $result->shuffle();
+        
+        // Multiple random sorts with different algorithms
+        for ($i = 0; $i < rand(3, 7); $i++) {
+            $result = $result->sortBy(function () {
+                return rand(1, 1000000);
+            })->values();
         }
+        
+        // Final shuffle with time-based seed
+        $result = $result->shuffle();
         
         return $result->take($count);
+    }
+    
+    /**
+     * Balanced selection across categories
+     */
+    private static function selectBalanced($pool, $count, $categories)
+    {
+        $questionsPerCategory = ceil($count / count($categories));
+        $selected = collect();
+        
+        foreach ($categories as $category) {
+            $categoryQuestions = $pool->where('category', $category)
+                ->shuffle()
+                ->take($questionsPerCategory);
+            $selected = $selected->merge($categoryQuestions);
+        }
+        
+        return $selected->shuffle()->take($count);
+    }
+    
+    /**
+     * Weighted random selection
+     */
+    private static function selectWeighted($pool, $count, $categories)
+    {
+        $weights = [];
+        foreach ($categories as $category) {
+            $weights[$category] = rand(1, 10);
+        }
+        
+        $selected = collect();
+        for ($i = 0; $i < $count; $i++) {
+            $randomCategory = self::weightedRandomSelect($weights);
+            $categoryPool = $pool->where('category', $randomCategory);
+            
+            if ($categoryPool->isNotEmpty()) {
+                $question = $categoryPool->random();
+                $selected->push($question);
+                $pool = $pool->reject(function ($q) use ($question) {
+                    return $q->id === $question->id;
+                });
+            }
+        }
+        
+        return $selected;
+    }
+    
+    /**
+     * Clustered selection (focus on fewer categories)
+     */
+    private static function selectClustered($pool, $count, $categories)
+    {
+        $focusCategories = collect($categories)->shuffle()->take(rand(2, 4))->toArray();
+        $filteredPool = $pool->whereIn('category', $focusCategories);
+        
+        return $filteredPool->shuffle()->take($count);
+    }
+    
+    /**
+     * Scattered selection (maximum variety)
+     */
+    private static function selectScattered($pool, $count, $categories)
+    {
+        $selected = collect();
+        $usedCategories = [];
+        
+        for ($i = 0; $i < $count; $i++) {
+            // Try to use each category only once if possible
+            $availableCategories = array_diff($categories, $usedCategories);
+            if (empty($availableCategories)) {
+                $availableCategories = $categories;
+                $usedCategories = [];
+            }
+            
+            $targetCategory = $availableCategories[array_rand($availableCategories)];
+            $usedCategories[] = $targetCategory;
+            
+            $categoryPool = $pool->where('category', $targetCategory);
+            if ($categoryPool->isNotEmpty()) {
+                $question = $categoryPool->random();
+                $selected->push($question);
+                $pool = $pool->reject(function ($q) use ($question) {
+                    return $q->id === $question->id;
+                });
+            }
+        }
+        
+        return $selected;
+    }
+    
+    /**
+     * Pure random selection
+     */
+    private static function selectPureRandom($pool, $count)
+    {
+        return $pool->shuffle()->take($count);
+    }
+    
+    /**
+     * Weighted random selection helper
+     */
+    private static function weightedRandomSelect($weights)
+    {
+        $totalWeight = array_sum($weights);
+        $random = rand(1, $totalWeight);
+        $currentWeight = 0;
+        
+        foreach ($weights as $category => $weight) {
+            $currentWeight += $weight;
+            if ($random <= $currentWeight) {
+                return $category;
+            }
+        }
+        
+        return array_keys($weights)[0];
     }
 } 

@@ -9,7 +9,7 @@ use Illuminate\Http\JsonResponse;
 class GeoQuestionController extends Controller
 {
     /**
-     * Get questions for a GeoSprint game round
+     * Get questions for a GeoSprint game round with ULTRA randomization
      */
     public function getGameQuestions(Request $request): JsonResponse
     {
@@ -17,6 +17,12 @@ class GeoQuestionController extends Controller
             $count = $request->get('count', 10);
             $variety = $request->get('variety', true);
             $excludeIds = $request->get('exclude_ids', '');
+            
+            // ULTRA-RANDOMIZATION parameters
+            $sessionSeed = $request->get('session_seed', time());
+            $randomOffset = $request->get('random_offset', 0);
+            $varietyBoost = $request->get('variety_boost', 'normal');
+            $ultraRandom = $request->get('ultra_random', 0);
             
             // Validate count
             if ($count < 1 || $count > 50) {
@@ -26,17 +32,44 @@ class GeoQuestionController extends Controller
                 ], 400);
             }
             
+            // Apply session-specific randomization seed
+            srand(intval($sessionSeed) + intval($randomOffset));
+            
             // Parse exclude IDs
             $excludeArray = [];
             if (!empty($excludeIds)) {
                 $excludeArray = array_filter(explode(',', $excludeIds));
             }
             
-            // Get questions with enhanced variety and exclusions
-            if ($variety) {
-                $questions = GeoQuestion::getEnhancedVariedQuestions($count, $excludeArray);
+            // Apply ultra-randomization if requested
+            if ($ultraRandom) {
+                // Increase count for better randomization pool
+                $poolCount = $count * (rand(15, 25)); // 15-25x more questions in pool
+                $questions = GeoQuestion::getUltraRandomQuestions($poolCount, $excludeArray);
+                
+                // Apply multiple randomization layers
+                for ($i = 0; $i < rand(5, 10); $i++) {
+                    $questions = $questions->shuffle();
+                }
+                
+                // Take final selection
+                $questions = $questions->take($count);
             } else {
-                $questions = GeoQuestion::getRandomQuestionsExcluding($count, $excludeArray);
+                // Enhanced variety with exclusions
+                if ($variety) {
+                    $questions = GeoQuestion::getEnhancedVariedQuestions($count, $excludeArray);
+                } else {
+                    $questions = GeoQuestion::getRandomQuestionsExcluding($count, $excludeArray);
+                }
+            }
+            
+            // Apply variety boost if specified
+            if ($varietyBoost === 'ultra' || $varietyBoost === 'max') {
+                $questions = $questions->shuffle();
+                
+                // Re-randomize with different seed
+                srand(time() + rand(1, 10000));
+                $questions = $questions->shuffle();
             }
             
             // Transform questions for frontend
@@ -57,7 +90,10 @@ class GeoQuestionController extends Controller
                 'success' => true,
                 'questions' => $formattedQuestions,
                 'count' => $formattedQuestions->count(),
-                'excluded_count' => count($excludeArray)
+                'excluded_count' => count($excludeArray),
+                'randomization_level' => $ultraRandom ? 'ultra' : 'enhanced',
+                'variety_boost' => $varietyBoost,
+                'session_seed' => $sessionSeed
             ]);
             
         } catch (\Exception $e) {
