@@ -107,11 +107,23 @@ class GeoQuestion extends Model
     public static function getEnhancedVariedQuestions($count = 10, $excludeIds = [])
     {
         $questions = collect();
-        $categories = ['ethiopia', 'africa', 'world'];
+        
+        // Get all available categories dynamically
+        $categories = self::active()
+            ->select('category')
+            ->distinct()
+            ->pluck('category')
+            ->toArray();
+        
+        if (empty($categories)) {
+            // Fallback to random questions if no categories found
+            return self::getRandomQuestionsExcluding($count, $excludeIds);
+        }
+        
         $difficulties = ['easy', 'medium', 'hard'];
         
         // Target distribution: balanced across categories and difficulties
-        $questionsPerCategory = ceil($count / 3);
+        $questionsPerCategory = ceil($count / count($categories));
         $difficultyWeights = ['easy' => 0.4, 'medium' => 0.4, 'hard' => 0.2];
         
         foreach ($categories as $category) {

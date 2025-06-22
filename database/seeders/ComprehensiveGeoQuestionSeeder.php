@@ -10,24 +10,24 @@ use Illuminate\Support\Facades\DB;
 class ComprehensiveGeoQuestionSeeder extends Seeder
 {
     /**
-     * Run the database seeds - Merge 2000 existing + 5000 new = 7000 total questions
+     * Run the database seeds - Insert JSON data as-is with maximum randomization
      */
     public function run(): void
     {
-        $this->command->info('🌍 Comprehensive GeoSprint Question Seeder');
-        $this->command->info('========================================');
-        $this->command->info('📊 Target: 7000 questions (2000 existing + 5000 new)');
+        $this->command->info('🌍 Comprehensive Question Seeder (No Validation)');
+        $this->command->info('===============================================');
+        $this->command->info('📊 Target: Insert all JSON data as-is with maximum randomization');
         
-        // Step 1: Read existing 2000 questions from database
+        // Step 1: Read existing questions from database
         $existingQuestions = $this->getExistingQuestions();
         
-        // Step 2: Read new 5000 questions from JSON file
+        // Step 2: Read new questions from JSON file (no validation)
         $newQuestions = $this->readNewQuestions();
         
-        // Step 3: Merge and randomize all 7000 questions
+        // Step 3: Merge and apply MAXIMUM randomization
         $allQuestions = $this->mergeAndRandomizeQuestions($existingQuestions, $newQuestions);
         
-        // Step 4: Clear database and insert randomized questions
+        // Step 4: Clear database and insert in completely random order
         $this->insertRandomizedQuestions($allQuestions);
         
         // Step 5: Display final statistics
@@ -98,37 +98,28 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
             
             $this->command->info("Found " . count($questionsData) . " questions in JSON file");
             
-            // Validate and prepare questions
-            $validQuestions = [];
-            $invalidCount = 0;
-            
-            foreach ($questionsData as $index => $questionData) {
-                if ($this->isValidQuestion($questionData)) {
-                    $validQuestions[] = [
-                        'question_id' => $questionData['id'],
-                        'question' => $questionData['question'],
-                        'options' => json_encode($questionData['options']),
-                        'correct_answer' => $questionData['correctAnswer'],
-                        'category' => $questionData['category'],
-                        'difficulty' => $questionData['difficulty'],
-                        'explanation' => $questionData['explanation'] ?? null,
-                        'points' => $questionData['points'],
-                        'is_active' => true,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                        'source' => 'new_json'
-                    ];
-                } else {
-                    $invalidCount++;
-                }
-            }
-            
-            if ($invalidCount > 0) {
-                $this->command->warn("⚠️  Skipped {$invalidCount} invalid questions from JSON");
-            }
-            
-            $this->command->info("✅ Loaded " . count($validQuestions) . " valid new questions");
-            return $validQuestions;
+                                                   // Prepare questions without validation - insert as-is
+             $newQuestions = [];
+             
+             foreach ($questionsData as $questionData) {
+                 $newQuestions[] = [
+                     'question_id' => $questionData['id'],
+                     'question' => $questionData['question'],
+                     'options' => json_encode($questionData['options']),
+                     'correct_answer' => $questionData['correctAnswer'],
+                     'category' => $questionData['category'],
+                     'difficulty' => $questionData['difficulty'],
+                     'explanation' => $questionData['explanation'] ?? null,
+                     'points' => $questionData['points'],
+                     'is_active' => true,
+                     'created_at' => now(),
+                     'updated_at' => now(),
+                     'source' => 'new_json'
+                 ];
+             }
+             
+             $this->command->info("✅ Loaded " . count($newQuestions) . " questions from JSON (no validation)");
+             return $newQuestions;
             
         } catch (\Exception $e) {
             $this->command->error("❌ Error reading JSON file: " . $e->getMessage());
@@ -136,29 +127,7 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
         }
     }
 
-    /**
-     * Validate individual question structure
-     */
-    private function isValidQuestion(array $questionData): bool
-    {
-        $requiredFields = ['id', 'question', 'options', 'correctAnswer', 'category', 'difficulty', 'points'];
-        
-        foreach ($requiredFields as $field) {
-            if (!isset($questionData[$field])) {
-                return false;
-            }
-        }
 
-        return is_array($questionData['options']) &&
-               count($questionData['options']) === 4 &&
-               is_int($questionData['correctAnswer']) &&
-               $questionData['correctAnswer'] >= 0 &&
-               $questionData['correctAnswer'] <= 3 &&
-               in_array($questionData['category'], ['ethiopia', 'africa', 'world']) &&
-               in_array($questionData['difficulty'], ['easy', 'medium', 'hard']) &&
-               is_int($questionData['points']) &&
-               $questionData['points'] > 0;
-    }
 
     /**
      * Merge and randomize all questions
@@ -195,24 +164,44 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
         $uniqueCount = count($uniqueQuestions);
         $this->command->info("✅ Unique questions: {$uniqueCount}");
         
-        // Randomize the order completely
-        $this->command->info('🎲 Randomizing insertion order...');
+        // MAXIMUM RANDOMIZATION - multiple shuffle stages
+        $this->command->info('🎲 Applying maximum randomization to insertion order...');
+        
+        // Stage 1: Initial shuffle
         shuffle($uniqueQuestions);
         
-        // Additional randomization: create multiple random chunks and re-shuffle
-        $chunks = array_chunk($uniqueQuestions, 500);
+        // Stage 2: Random chunk method (varying chunk sizes)
+        $chunkSizes = [50, 100, 200, 300, 500];
+        $randomChunkSize = $chunkSizes[array_rand($chunkSizes)];
+        $chunks = array_chunk($uniqueQuestions, $randomChunkSize);
         shuffle($chunks);
-        $randomizedQuestions = [];
         
+        $randomizedQuestions = [];
         foreach ($chunks as $chunk) {
-            shuffle($chunk);
+            shuffle($chunk); // Shuffle within each chunk
             $randomizedQuestions = array_merge($randomizedQuestions, $chunk);
         }
         
-        // Final shuffle to ensure maximum randomization
+        // Stage 3: Second full shuffle
         shuffle($randomizedQuestions);
         
-        $this->command->info("🔀 Questions randomized for insertion");
+        // Stage 4: Random swap method for extra randomization
+        $totalQuestions = count($randomizedQuestions);
+        for ($i = 0; $i < $totalQuestions * 2; $i++) {
+            $pos1 = rand(0, $totalQuestions - 1);
+            $pos2 = rand(0, $totalQuestions - 1);
+            
+            // Swap elements at random positions
+            $temp = $randomizedQuestions[$pos1];
+            $randomizedQuestions[$pos1] = $randomizedQuestions[$pos2];
+            $randomizedQuestions[$pos2] = $temp;
+        }
+        
+        // Stage 5: Final shuffle to guarantee maximum randomness
+        shuffle($randomizedQuestions);
+        
+        $this->command->info("🔀 Maximum randomization applied - questions ready for insertion");
+        $this->command->info("🎯 Final order is completely random and unpredictable");
         
         return $randomizedQuestions;
     }
@@ -234,9 +223,15 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
             
             // Insert in chunks for better performance
             $chunks = array_chunk($questions, 100);
-            $progressBar = $this->command->output->createProgressBar(count($chunks));
+            $totalChunks = count($chunks);
             
-            foreach ($chunks as $chunk) {
+            // Create progress bar only if command is available
+            $progressBar = null;
+            if (isset($this->command) && $this->command->output) {
+                $progressBar = $this->command->output->createProgressBar($totalChunks);
+            }
+            
+            foreach ($chunks as $index => $chunk) {
                 // Remove the 'source' field before insertion
                 $cleanChunk = array_map(function ($question) {
                     unset($question['source']);
@@ -244,11 +239,20 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
                 }, $chunk);
                 
                 GeoQuestion::insert($cleanChunk);
-                $progressBar->advance();
+                
+                if ($progressBar) {
+                    $progressBar->advance();
+                } else {
+                    // Show progress without progress bar
+                    $current = $index + 1;
+                    $this->command->info("Inserted chunk {$current}/{$totalChunks}");
+                }
             }
             
-            $progressBar->finish();
-            $this->command->newLine();
+            if ($progressBar) {
+                $progressBar->finish();
+                $this->command->newLine();
+            }
             
             DB::commit();
             
@@ -269,29 +273,47 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
     {
         $this->command->info('📊 === FINAL STATISTICS ===');
         
-        $stats = [
-            'total' => GeoQuestion::count(),
-            'ethiopia' => GeoQuestion::where('category', 'ethiopia')->count(),
-            'africa' => GeoQuestion::where('category', 'africa')->count(),
-            'world' => GeoQuestion::where('category', 'world')->count(),
-            'easy' => GeoQuestion::where('difficulty', 'easy')->count(),
-            'medium' => GeoQuestion::where('difficulty', 'medium')->count(),
-            'hard' => GeoQuestion::where('difficulty', 'hard')->count(),
+        $totalCount = GeoQuestion::count();
+        
+        // Get all categories dynamically
+        $categories = GeoQuestion::select('category')
+            ->groupBy('category')
+            ->orderBy('category')
+            ->pluck('category')
+            ->toArray();
+        
+        // Get all difficulties
+        $difficulties = GeoQuestion::select('difficulty')
+            ->groupBy('difficulty')
+            ->orderBy('difficulty')
+            ->pluck('difficulty')
+            ->toArray();
+        
+        $tableData = [
+            ['Total Questions', $totalCount, '100%'],
+            ['', '', ''],
         ];
         
-        $this->command->table(['Metric', 'Count', 'Percentage'], [
-            ['Total Questions', $stats['total'], '100%'],
-            ['', '', ''],
-            ['Ethiopia', $stats['ethiopia'], round(($stats['ethiopia']/$stats['total'])*100, 1) . '%'],
-            ['Africa', $stats['africa'], round(($stats['africa']/$stats['total'])*100, 1) . '%'],
-            ['World', $stats['world'], round(($stats['world']/$stats['total'])*100, 1) . '%'],
-            ['', '', ''],
-            ['Easy', $stats['easy'], round(($stats['easy']/$stats['total'])*100, 1) . '%'],
-            ['Medium', $stats['medium'], round(($stats['medium']/$stats['total'])*100, 1) . '%'],
-            ['Hard', $stats['hard'], round(($stats['hard']/$stats['total'])*100, 1) . '%'],
-        ]);
+        // Add category stats
+        foreach ($categories as $category) {
+            $count = GeoQuestion::where('category', $category)->count();
+            $percentage = round(($count / $totalCount) * 100, 1) . '%';
+            $tableData[] = [ucfirst($category), $count, $percentage];
+        }
         
-        $this->command->info('🎉 Database now contains ' . $stats['total'] . ' randomized geography questions!');
-        $this->command->info('🎮 Ready for endless GeoSprint gameplay with no repetitions!');
+        $tableData[] = ['', '', ''];
+        
+        // Add difficulty stats
+        foreach ($difficulties as $difficulty) {
+            $count = GeoQuestion::where('difficulty', $difficulty)->count();
+            $percentage = round(($count / $totalCount) * 100, 1) . '%';
+            $tableData[] = [ucfirst($difficulty), $count, $percentage];
+        }
+        
+        $this->command->table(['Metric', 'Count', 'Percentage'], $tableData);
+        
+        $this->command->info('🎉 Database now contains ' . $totalCount . ' randomized questions!');
+        $this->command->info('🔀 All questions inserted in completely random order (no validation applied)');
+        $this->command->info('🎮 Ready for endless gameplay with maximum variety!');
     }
 } 
