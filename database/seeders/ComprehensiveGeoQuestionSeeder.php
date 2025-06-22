@@ -268,8 +268,8 @@ class ComprehensiveGeoQuestionSeeder extends Seeder
         DB::beginTransaction();
         
         try {
-            // Clear existing questions
-            GeoQuestion::truncate();
+            // Clear existing questions (DELETE instead of TRUNCATE to preserve transaction)
+            GeoQuestion::query()->delete();
             
             $this->info('📥 Inserting randomized questions...');
             
