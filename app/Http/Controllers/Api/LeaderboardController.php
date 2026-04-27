@@ -61,7 +61,8 @@ class LeaderboardController extends Controller
                     'user' => [
                         'id' => $entry->user->id,
                         'name' => $entry->user->name,
-                        'level' => $entry->user->level
+                        'level' => $entry->user->level,
+                        'avatar' => $entry->user->avatar
                     ],
                     'badge' => $badges[$entry->user->id] ?? null,
                     'games_played' => $entry->games_played,
@@ -129,7 +130,8 @@ class LeaderboardController extends Controller
                         'user' => [
                             'id' => $entry->user->id,
                             'name' => $entry->user->name,
-                            'level' => $entry->user->level
+                            'level' => $entry->user->level,
+                            'avatar' => $entry->user->avatar
                         ],
                         'badge' => $badges[$entry->user->id] ?? null,
                         'best_score' => $entry->best_score,
@@ -231,7 +233,8 @@ class LeaderboardController extends Controller
                             'user' => [
                                 'id' => $entry->user->id,
                                 'name' => $entry->user->name,
-                                'level' => $entry->user->level
+                                'level' => $entry->user->level,
+                                'avatar' => $entry->user->avatar
                             ],
                             'badge' => $badges[$entry->user->id] ?? null,
                             'games_played' => $entry->games_played,
