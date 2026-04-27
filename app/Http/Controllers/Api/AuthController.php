@@ -312,9 +312,9 @@ class AuthController extends Controller
     private function sendSms(string $phone, string $otp, string $language): bool
     {
         $messages = [
-            'en' => "Your GameHub-ET verification code is: {$otp}. Valid for 5 minutes.",
-            'am' => "የGameHub-ET ማረጋገጫ ኮድዎ: {$otp}። ለ5 ደቂቃ ይቆያል።",
-            'or' => "Koodii mirkaneessaa GameHub-ET keessan: {$otp}. Daqiiqaa 5f jiraata."
+            'en' => "Your Ahaz one time code is: {$otp}. Valid for 5 minutes.",
+            'am' => "የአሃዝ ማረጋገጫ ኮድዎ: {$otp}። ለ5 ደቂቃ ይቆያል።",
+            'or' => "Koodii mirkaneessaa Ahaaz keessan: {$otp}. Daqiiqaa shaniif ni tura."
         ];
 
         $message = $messages[$language] ?? $messages['en'];
