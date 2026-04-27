@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\OTP;
+use App\Services\SmsService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
@@ -14,6 +15,10 @@ use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
+    public function __construct(private readonly SmsService $smsService)
+    {
+    }
+
     /**
      * Send OTP to phone number
      */
@@ -59,7 +64,7 @@ class AuthController extends Controller
         // For development, log the OTP
         Log::info("OTP for {$phone}: {$otpCode}");
 
-        // Simulate SMS sending
+        // Send OTP via configured SMS provider
         $this->sendSms($phone, $otpCode, $language);
 
         return response()->json([
@@ -164,6 +169,7 @@ class AuthController extends Controller
                     'language' => $user->locale,
                     'tokens' => $user->tokens_balance,
                     'earned_tokens' => $user->earned_tokens_balance,
+                    'has_active_subscription' => $user->hasActiveSubscription(),
                     'level' => $user->level,
                     'experience' => $user->experience,
                     'can_claim_daily_bonus' => $user->canClaimDailyBonus()
@@ -199,6 +205,7 @@ class AuthController extends Controller
                     'language' => $user->locale,
                     'tokens' => $user->tokens_balance,
                     'earned_tokens' => $user->earned_tokens_balance,
+                    'has_active_subscription' => $user->hasActiveSubscription(),
                     'level' => $user->level,
                     'experience' => $user->experience,
                     'can_claim_daily_bonus' => $user->canClaimDailyBonus()
@@ -253,9 +260,14 @@ class AuthController extends Controller
 
         $message = $messages[$language] ?? $messages['en'];
 
-        // TODO: Integrate with SMS service provider
-        // Example: Africa's Talking, Twilio, etc.
-        Log::info("SMS to {$phone}: {$message}");
+        $sendResult = $this->smsService->sendOtp($phone, $message);
+
+        if (!$sendResult['success']) {
+            Log::warning('OTP SMS send did not complete successfully', [
+                'phone' => $phone,
+                'result' => $sendResult,
+            ]);
+        }
     }
 
     /**

@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\MultiplayerCodeBreakerController;
 use App\Http\Controllers\Api\MultiplayerCrazyController;
 use App\Http\Controllers\Api\HangmanController;
 use App\Http\Controllers\Api\MarketplaceController;
+use App\Http\Controllers\Api\PaymentWebhookController;
 use App\Http\Controllers\GeoQuestionController;
 
 /*
@@ -26,6 +27,8 @@ use App\Http\Controllers\GeoQuestionController;
 | API Routes
 |--------------------------------------------------------------------------
 */
+
+Route::post('/pay', [PaymentWebhookController::class, 'pay']);
 
 // Public routes
 Route::prefix('v1')->group(function () {
@@ -223,20 +226,20 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/profile/check-username', [ProfileController::class, 'checkUsername']);
     
     // Mines specific routes (must come before generic game routes)
-    Route::post('/games/mines/start', [MinesController::class, 'start']);
+    Route::post('/games/mines/start', [MinesController::class, 'start'])->middleware('active.subscription');
     Route::post('/games/mines/{round}/reveal', [MinesController::class, 'reveal']);
     Route::post('/games/mines/{round}/cashout', [MinesController::class, 'cashOut']);
     Route::post('/games/mines/{round}/flag', [MinesController::class, 'useFlag']);
     Route::get('/games/mines/history', [MinesController::class, 'history']);
     
     // Sum Chaser specific routes
-    Route::post('/games/sum-chaser/start', [SumChaserController::class, 'start']);
+    Route::post('/games/sum-chaser/start', [SumChaserController::class, 'start'])->middleware('active.subscription');
     Route::post('/games/sum-chaser/{round}/predict', [SumChaserController::class, 'predict']);
     Route::post('/games/sum-chaser/{round}/cashout', [SumChaserController::class, 'cashOut']);
     Route::get('/games/sum-chaser/history', [SumChaserController::class, 'history']);
 
     // Multiplayer routes
-    Route::prefix('multiplayer')->group(function () {
+    Route::prefix('multiplayer')->middleware('active.subscription')->group(function () {
         Route::get('/rooms', [MultiplayerController::class, 'index']);
         Route::get('/my-active-room', [MultiplayerController::class, 'getMyActiveRoom']);
         Route::post('/rooms', [MultiplayerController::class, 'create']);
@@ -282,7 +285,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     });
     
     // Game management
-    Route::post('/games/{game}/start', [GameController::class, 'startRound']);
+    Route::post('/games/{game}/start', [GameController::class, 'startRound'])->middleware('active.subscription');
     Route::post('/games/{game}/submit', [GameController::class, 'submitRound']);
     Route::get('/games/{game}/rounds', [GameController::class, 'userRounds']);
     
@@ -293,7 +296,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/codebreaker/state/{round}', [CodeBreakerController::class, 'getGameState']);
     
     // Hangman specific routes
-    Route::post('/hangman/start', [HangmanController::class, 'startRound']);
+    Route::post('/hangman/start', [HangmanController::class, 'startRound'])->middleware('active.subscription');
     Route::post('/hangman/guess', [HangmanController::class, 'processGuess']);
     Route::post('/hangman/submit', [HangmanController::class, 'submitRound']);
     Route::post('/hangman/hint', [HangmanController::class, 'getHint']);

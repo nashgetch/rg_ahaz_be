@@ -12,6 +12,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        $middleware->alias([
+            'active.subscription' => \App\Http\Middleware\EnsureActiveSubscription::class,
+        ]);
+
         $middleware->redirectGuestsTo(function ($request) {
             // For API routes, always return null to prevent redirects
             if ($request->is('api/*') || 
