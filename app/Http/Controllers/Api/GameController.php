@@ -360,47 +360,70 @@ class GameController extends Controller
                 'timeout_score' => $timeoutScore
             ]);
             
-            $round->update([
-                'completed_at' => now(),
-                'score' => $timeoutScore,
-                'is_timeout' => true
-            ]);
+            $rewardableTimeoutGames = ['letter-leap', 'math-sprint-duel', 'pixel-reveal', 'rapid-recall', 'number-merge-2048', 'word-grid-blitz', 'geo-sprint'];
+            $canRewardOnTimeout = in_array($game->slug, $rewardableTimeoutGames, true) && $timeoutScore > 0;
 
-            // Update leaderboards for Letter Leap and Math Sprint Duel even on timeout
-            if (in_array($game->slug, ['letter-leap', 'math-sprint-duel', 'pixel-reveal', 'rapid-recall', 'number-merge-2048', 'word-grid-blitz', 'geo-sprint']) && $timeoutScore > 0) {
-                Log::info('Updating leaderboards for timed out ' . $game->title . ' round', [
-                    'user_id' => $user->id,
-                    'game_id' => $game->id,
-                    'round_id' => $round->id,
-                    'score' => $timeoutScore
+            DB::beginTransaction();
+            try {
+                $rewardTokens = $canRewardOnTimeout ? $game->calculateReward($timeoutScore) : 0;
+                $experienceGained = $canRewardOnTimeout ? $this->calculateExperience($game, $timeoutScore) : 0;
+
+                $round->update([
+                    'completed_at' => now(),
+                    'score' => $timeoutScore,
+                    'is_timeout' => true,
+                    'completion_time' => $game->getConfigValue('time_limit', 300),
+                    'reward_tokens' => $rewardTokens,
+                    'experience_gained' => $experienceGained,
                 ]);
-                
-                try {
-                    $historicalLeaderboardService = app(\App\Services\HistoricalLeaderboardService::class);
-                    $historicalLeaderboardService->updateLeaderboards($user, $game, $timeoutScore);
-                    Log::info('Successfully updated leaderboards for timed out ' . $game->title . ' round');
-                } catch (\Exception $e) {
-                    Log::error('Failed to update leaderboards for timed out ' . $game->title . ' round', [
-                        'user_id' => $user->id,
+
+                if ($rewardTokens > 0) {
+                    $user->awardTokens($rewardTokens, 'prize', "Timed game reward: {$game->title}", [
                         'game_id' => $game->id,
                         'round_id' => $round->id,
                         'score' => $timeoutScore,
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString()
+                        'is_timeout' => true,
                     ]);
+                    $user->addExperience($experienceGained);
                 }
-            } else {
-                Log::info('Skipping leaderboard update for timeout', [
-                    'game_slug' => $game->slug,
-                    'timeout_score' => $timeoutScore,
-                    'is_letter_leap' => $game->slug === 'letter-leap'
+
+                if ($timeoutScore > 0) {
+                    $historicalLeaderboardService = app(\App\Services\HistoricalLeaderboardService::class);
+                    $historicalLeaderboardService->updateLeaderboards($user, $game, $timeoutScore);
+                }
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                Log::error('Failed to finalize timed out round', [
+                    'user_id' => $user->id,
+                    'game_id' => $game->id,
+                    'round_id' => $round->id,
+                    'score' => $timeoutScore,
+                    'error' => $e->getMessage(),
                 ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to finalize timed out round',
+                ], 500);
             }
 
             return response()->json([
-                'success' => false,
-                'message' => 'Round timed out'
-            ], 422);
+                'success' => true,
+                'message' => 'Round completed (time limit reached)',
+                'data' => [
+                    'score' => $timeoutScore,
+                    'tokens_earned' => $round->reward_tokens ?? 0,
+                    'experience_gained' => $round->experience_gained ?? 0,
+                    'user_tokens' => $user->fresh()->tokens_balance,
+                    'user_earned_tokens' => $user->fresh()->earned_tokens_balance,
+                    'user_level' => $user->fresh()->level,
+                    'user_experience' => $user->fresh()->experience,
+                    'is_personal_best' => $this->isPersonalBest($user, $game, $timeoutScore),
+                    'timed_out' => true,
+                ]
+            ]);
         }
 
         // Anti-cheat validation

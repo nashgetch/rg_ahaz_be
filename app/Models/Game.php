@@ -92,25 +92,19 @@ class Game extends Model
      */
     public function calculateReward(int $score): int
     {
-        // Get user's highest score for this game
-        $user = auth()->user();
-        $highestScore = $user->rounds()
-            ->where('game_id', $this->id)
-            ->whereNotNull('completed_at')
-            ->where('score', '<', $score) // Only get scores less than current score
-            ->max('score');
-
-        // Only reward tokens if this is a new high score
-        if ($highestScore === null) {
-            // First time playing, reward up to 5 tokens
-            return min(5, $score / 100);
-        } else if ($score > $highestScore) {
-            // Beat previous high score, reward up to 5 tokens
-            return min(5, $score / 100);
+        if ($score <= 0) {
+            return 0;
         }
 
-        // No tokens if didn't beat high score
-        return 0;
+        $maxReward = max(1, (int) $this->max_score_reward);
+        $maxScore = (int) $this->getConfigValue('max_score', 1000);
+        $maxScore = max(100, $maxScore);
+
+        $normalized = min(1, $score / $maxScore);
+        $calculated = (int) round($normalized * $maxReward);
+
+        // Ensure valid completed games always award at least 1 token.
+        return max(1, $calculated);
     }
 
     /**
