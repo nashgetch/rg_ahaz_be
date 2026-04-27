@@ -32,7 +32,7 @@ class LeaderboardController extends Controller
     {
         $limit = min((int)$request->get('limit', 50), 100);
         
-        $cacheKey = "leaderboards:all:limit:{$limit}";
+        $cacheKey = "leaderboards_v2:all:limit:{$limit}";
         
         $leaderboards = Cache::remember($cacheKey, 300, function () use ($limit) {
             // Get top players by total score across all games (sum of best scores)
@@ -103,7 +103,7 @@ class LeaderboardController extends Controller
         $periodKey = $request->get('period_key');
         $limit = min((int)$request->get('limit', 100), 200);
 
-        $cacheKey = "leaderboards:game:{$game->id}:{$period}:{$periodKey}:limit:{$limit}";
+        $cacheKey = "leaderboards_v2:game:{$game->id}:{$period}:{$periodKey}:limit:{$limit}";
 
         $leaderboard = Cache::remember($cacheKey, 300, function () use ($game, $period, $periodKey, $limit) {
             if ($period === 'monthly' && $periodKey) {
@@ -203,7 +203,7 @@ class LeaderboardController extends Controller
         $period = $request->get('period', 'current');
         $limit = min((int)$request->get('limit', 50), 100);
 
-        $cacheKey = "leaderboards:top_players:{$period}:limit:{$limit}";
+        $cacheKey = "leaderboards_v2:top_players:{$period}:limit:{$limit}";
 
         $players = Cache::remember($cacheKey, 600, function () use ($period, $limit) {
             if ($period === 'current') {
@@ -273,7 +273,7 @@ class LeaderboardController extends Controller
         $period = $request->get('period', 'current');
         $periodKey = $request->get('period_key');
 
-        $cacheKey = "leaderboards:rank:user:{$user->id}:game:{$game->id}:{$period}:{$periodKey}";
+        $cacheKey = "leaderboards_v2:rank:user:{$user->id}:game:{$game->id}:{$period}:{$periodKey}";
 
         $rankData = Cache::remember($cacheKey, 60, function () use ($user, $game, $period, $periodKey) {
             $query = Leaderboard::where('game_id', $game->id);

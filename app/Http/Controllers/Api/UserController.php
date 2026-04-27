@@ -34,7 +34,9 @@ class UserController extends Controller
                 'can_claim_daily_bonus' => $user->canClaimDailyBonus(),
                 'last_daily_bonus' => $user->daily_bonus_claimed_at,
                 'created_at' => $user->created_at,
-                'avatar' => $user->avatar ?? null
+                'avatar' => $user->avatar ?? null,
+                'has_active_subscription' => $user->hasActiveSubscription(),
+                'has_active_subscription' => $user->hasActiveSubscription()
             ]
         ]);
     }
@@ -52,7 +54,8 @@ class UserController extends Controller
                 'level' => $user->level ?? 1,
                 'experience' => $user->experience ?? 0,
                 'created_at' => $user->created_at,
-                'avatar' => $user->avatar ?? null
+                'avatar' => $user->avatar ?? null,
+                'has_active_subscription' => $user->hasActiveSubscription()
             ]
         ]);
     }
