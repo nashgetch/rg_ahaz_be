@@ -121,10 +121,6 @@ class User extends Authenticatable
     public function spendTokens(int $amount, string $description, array $meta = []): Transaction
     {
         $this->decrement('tokens_balance', $amount);
-        $earnedToDeduct = min((int) $this->earned_tokens_balance, $amount);
-        if ($earnedToDeduct > 0) {
-            $this->decrement('earned_tokens_balance', $earnedToDeduct);
-        }
 
         return $this->transactions()->create([
             'amount' => -$amount,
