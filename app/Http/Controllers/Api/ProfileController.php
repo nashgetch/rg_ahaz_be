@@ -59,6 +59,7 @@ class ProfileController extends Controller
                     'phone' => $user->phone,
                     'language' => $user->locale,
                     'tokens' => $user->tokens_balance,
+                    'earned_tokens' => $user->earned_tokens_balance,
                     'level' => $user->level,
                     'experience' => $user->experience,
                     'can_claim_daily_bonus' => $user->canClaimDailyBonus()
@@ -174,6 +175,7 @@ class ProfileController extends Controller
                         'phone' => $user->phone,
                         'language' => $user->locale,
                         'tokens' => $user->tokens_balance,
+                        'earned_tokens' => $user->earned_tokens_balance,
                         'level' => $user->level,
                         'experience' => $user->experience,
                         'can_claim_daily_bonus' => $user->canClaimDailyBonus()
@@ -236,6 +238,7 @@ class ProfileController extends Controller
                     'phone' => $user->phone,
                     'language' => $user->locale,
                     'tokens' => $user->tokens_balance,
+                    'earned_tokens' => $user->earned_tokens_balance,
                     'level' => $user->level,
                     'experience' => $user->experience,
                     'can_claim_daily_bonus' => $user->canClaimDailyBonus(),

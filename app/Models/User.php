@@ -29,6 +29,7 @@ class User extends Authenticatable
         'password',
         'locale',
         'tokens_balance',
+        'earned_tokens_balance',
         'level',
         'experience',
         'penalty_points',
@@ -83,6 +84,14 @@ class User extends Authenticatable
     }
 
     /**
+     * Get the marketplace purchases for the user.
+     */
+    public function marketplacePurchases(): HasMany
+    {
+        return $this->hasMany(UserMarketplacePurchase::class);
+    }
+
+    /**
      * Get the leaderboard entries for the user.
      */
     public function leaderboards(): HasMany
@@ -128,6 +137,9 @@ class User extends Authenticatable
     public function awardTokens(int $amount, string $type, string $description, array $meta = []): Transaction
     {
         $this->increment('tokens_balance', $amount);
+        if ($type === 'prize') {
+            $this->increment('earned_tokens_balance', $amount);
+        }
 
         return $this->transactions()->create([
             'amount' => $amount,

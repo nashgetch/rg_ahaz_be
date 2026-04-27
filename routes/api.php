@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\MultiplayerController;
 use App\Http\Controllers\Api\MultiplayerCodeBreakerController;
 use App\Http\Controllers\Api\MultiplayerCrazyController;
 use App\Http\Controllers\Api\HangmanController;
+use App\Http\Controllers\Api\MarketplaceController;
 use App\Http\Controllers\GeoQuestionController;
 
 /*
@@ -304,6 +305,11 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Transactions
     Route::get('/transactions', [TransactionController::class, 'index']);
     Route::post('/transactions/purchase-tokens', [TransactionController::class, 'purchaseTokens']);
+
+    // Marketplace
+    Route::get('/marketplace/items', [MarketplaceController::class, 'items']);
+    Route::post('/marketplace/purchase', [MarketplaceController::class, 'purchase']);
+    Route::get('/marketplace/purchases', [MarketplaceController::class, 'purchases']);
     
     // User-specific leaderboard and stats (require authentication)
     Route::get('/leaderboards/games/{game}/rank', [LeaderboardController::class, 'playerRank']);

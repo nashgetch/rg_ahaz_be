@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             GameSeeder::class,
+            MarketplaceItemSeeder::class,
             // Uncomment to seed geography questions:
             // JSONGeoQuestionSeeder::class,
             // ComprehensiveGeoQuestionSeeder::class,

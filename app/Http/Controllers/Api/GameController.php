@@ -497,6 +497,7 @@ class GameController extends Controller
                     'tokens_earned' => $rewardTokens,
                     'experience_gained' => $experienceGained,
                     'user_tokens' => $user->fresh()->tokens_balance,
+                    'user_earned_tokens' => $user->fresh()->earned_tokens_balance,
                     'user_level' => $user->fresh()->level,
                     'user_experience' => $user->fresh()->experience,
                     'is_personal_best' => $this->isPersonalBest($user, $game, $request->score)

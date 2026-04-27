@@ -25,6 +25,7 @@ class UserController extends Controller
                 'phone' => $user->phone,
                 'language' => $user->locale,
                 'tokens' => $user->tokens_balance,
+                'earned_tokens' => $user->earned_tokens_balance,
                 'level' => $user->level ?? 1,
                 'experience' => $user->experience ?? 0,
                 'experience_to_next_level' => $user->experienceToNextLevel(),
