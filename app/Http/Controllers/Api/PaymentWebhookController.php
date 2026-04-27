@@ -47,7 +47,7 @@ class PaymentWebhookController extends Controller
             'data' => 'required|array',
             'data.id' => 'required|string|max:191',
             'data.status' => 'required|string|in:active,pending,inactive,cancelled,trial,expired',
-            'data.phone' => 'required|string|max:20',
+            'data.phone' => 'required|max:20',
             'data.trial_end' => 'nullable|date',
             'data.activation_date' => 'nullable|date',
             'data.expires_at' => 'nullable|date',
@@ -73,11 +73,15 @@ class PaymentWebhookController extends Controller
 
         try {
             $subscriptionData = (array) $request->input('data', []);
-            $phone = $this->normalizePhone((string) ($subscriptionData['phone'] ?? ''));
-            $user = User::where('phone', $phone)->first();
+            $rawPhone = (string) ($subscriptionData['phone'] ?? '');
+            $phone = $this->normalizePhone($rawPhone); // 2519XXXXXXXX
+            $userPhone = '+' . $phone; // users table format
+            $user = User::where('phone', $userPhone)
+                ->orWhere('phone', $phone)
+                ->first();
             if (!$user) {
                 $user = User::create([
-                    'phone' => $phone,
+                    'phone' => $userPhone,
                     'name' => 'Subscriber' . substr(preg_replace('/\D/', '', $phone), -6),
                     'password' => Hash::make(Str::random(32)),
                     'locale' => 'en',
@@ -195,17 +199,16 @@ class PaymentWebhookController extends Controller
 
     private function normalizePhone(string $phone): string
     {
-        $phone = preg_replace('/[^\d+]/', '', $phone);
-        if (str_starts_with($phone, '0')) {
-            return '+251' . substr($phone, 1);
-        }
-        if (str_starts_with($phone, '251')) {
-            return '+' . $phone;
-        }
-        if (!str_starts_with($phone, '+251')) {
-            return '+251' . ltrim($phone, '+');
+        $digits = preg_replace('/\D/', '', $phone);
+
+        if (str_starts_with($digits, '251')) {
+            return $digits;
         }
 
-        return $phone;
+        if (str_starts_with($digits, '0')) {
+            return '251' . substr($digits, 1);
+        }
+
+        return '251' . ltrim($digits, '0');
     }
 }
