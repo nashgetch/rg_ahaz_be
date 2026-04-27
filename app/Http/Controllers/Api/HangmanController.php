@@ -376,30 +376,53 @@ class HangmanController extends Controller
             if ($updatedGameData['is_complete']) {
                 $completionTime = $elapsedTime;
                 $score = $updatedGameData['is_won'] ? $this->hangmanService->calculateScore($updatedGameData, $completionTime, $game->config) : 0;
-                
-                // No token rewards - set to 0
+
                 $rewardTokens = 0;
-                $experienceGained = $this->calculateExperience($game, $score);
+                $experienceGained = 0;
+                $freshUser = $user;
 
-                // Complete the round
-                $round->update([
-                    'completed_at' => now(),
-                    'score' => $score,
-                    'completion_time' => $completionTime,
-                    'reward_tokens' => $rewardTokens,
-                    'experience_gained' => $experienceGained
-                ]);
-
-                // Update leaderboard
+                DB::beginTransaction();
                 try {
+                    $rewardTokens = $score > 0 ? $game->calculateReward($score) : 0;
+                    $experienceGained = $this->calculateExperience($game, $score);
+
+                    // Complete the round
+                    $round->update([
+                        'completed_at' => now(),
+                        'score' => $score,
+                        'completion_time' => $completionTime,
+                        'reward_tokens' => $rewardTokens,
+                        'experience_gained' => $experienceGained
+                    ]);
+
+                    if ($rewardTokens > 0) {
+                        $user->awardTokens($rewardTokens, 'prize', "Hangman game reward", [
+                            'game_id' => $game->id,
+                            'round_id' => $round->id,
+                            'score' => $score
+                        ]);
+                    }
+
+                    $user->addExperience($experienceGained);
+
+                    // Update leaderboard
                     $historicalLeaderboardService = app(\App\Services\HistoricalLeaderboardService::class);
                     $historicalLeaderboardService->updateLeaderboards($user, $game, $score);
+
+                    DB::commit();
+                    $freshUser = $user->fresh();
                 } catch (\Exception $e) {
-                    Log::warning('Failed to update leaderboard for completed hangman game', [
+                    DB::rollBack();
+                    Log::error('Failed to complete Hangman round from guess', [
                         'user_id' => $user->id,
                         'round_id' => $round->id,
                         'error' => $e->getMessage()
                     ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Failed to complete round'
+                    ], 500);
                 }
 
                 // Return completion data
@@ -427,6 +450,8 @@ class HangmanController extends Controller
                         'final_score' => $score,
                         'tokens_earned' => $rewardTokens,
                         'experience_gained' => $experienceGained,
+                        'user_tokens' => $freshUser->tokens_balance,
+                        'user_earned_tokens' => $freshUser->earned_tokens_balance,
                         'word' => $updatedGameData['word']
                     ]
                 ]);
@@ -636,6 +661,7 @@ class HangmanController extends Controller
                     'tokens_earned' => $rewardTokens,
                     'experience_gained' => $experienceGained,
                     'user_tokens' => $user->fresh()->tokens_balance,
+                    'user_earned_tokens' => $user->fresh()->earned_tokens_balance,
                     'user_level' => $user->fresh()->level,
                     'user_experience' => $user->fresh()->experience,
                     'is_personal_best' => $this->isPersonalBest($user, $game, $request->score),

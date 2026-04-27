@@ -121,6 +121,10 @@ class User extends Authenticatable
     public function spendTokens(int $amount, string $description, array $meta = []): Transaction
     {
         $this->decrement('tokens_balance', $amount);
+        $earnedToDeduct = min((int) $this->earned_tokens_balance, $amount);
+        if ($earnedToDeduct > 0) {
+            $this->decrement('earned_tokens_balance', $earnedToDeduct);
+        }
 
         return $this->transactions()->create([
             'amount' => -$amount,
@@ -137,7 +141,7 @@ class User extends Authenticatable
     public function awardTokens(int $amount, string $type, string $description, array $meta = []): Transaction
     {
         $this->increment('tokens_balance', $amount);
-        if ($type === 'prize') {
+        if ($this->isEarnedRewardType($type)) {
             $this->increment('earned_tokens_balance', $amount);
         }
 
@@ -148,6 +152,14 @@ class User extends Authenticatable
             'meta' => $meta,
             'status' => 'completed',
         ]);
+    }
+
+    /**
+     * Determine whether awarded tokens should count as earned.
+     */
+    private function isEarnedRewardType(string $type): bool
+    {
+        return in_array($type, ['prize', 'bet_winnings', 'abandonment_reward'], true);
     }
 
     /**

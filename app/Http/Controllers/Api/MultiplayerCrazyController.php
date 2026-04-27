@@ -1241,15 +1241,12 @@ class MultiplayerCrazyController extends Controller
                         if ($user->id !== $winnerParticipant->user_id && $betAmount > 0) {
                             $balanceBefore = $user->tokens_balance;
                             
-                            // Deduct tokens from loser's balance and create transaction log
-                            $user->decrement('tokens_balance', $betAmount);
-                            $user->transactions()->create([
-                                'amount' => -$betAmount,
-                                'type' => 'powerup',
-                                'description' => "Multiplayer Crazy loss in room {$room->room_code}",
-                                'meta' => ['room_code' => $room->room_code, 'bet_loss' => true],
-                                'status' => 'completed',
-                            ]);
+                            // Deduct tokens from loser and keep earned-token ledger in sync.
+                            $user->spendTokens(
+                                $betAmount,
+                                "Multiplayer Crazy loss in room {$room->room_code}",
+                                ['room_code' => $room->room_code, 'bet_loss' => true]
+                            );
                             Log::info("Deducted tokens from loser", [
                                 'user_id' => $user->id, 
                                 'amount' => $betAmount, 
