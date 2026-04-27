@@ -309,7 +309,7 @@ class AuthController extends Controller
     /**
      * Send SMS (integrate with SMS provider)
      */
-    private function sendSms(string $phone, string $otp, string $language): void
+    private function sendSms(string $phone, string $otp, string $language): bool
     {
         $messages = [
             'en' => "Your GameHub-ET verification code is: {$otp}. Valid for 5 minutes.",
@@ -326,7 +326,10 @@ class AuthController extends Controller
                 'phone' => $phone,
                 'result' => $sendResult,
             ]);
+            return false;
         }
+        
+        return true;
     }
 
     /**
@@ -359,7 +362,14 @@ class AuthController extends Controller
         ]);
 
         Log::info("OTP for {$phone}: {$otpCode}");
-        $this->sendSms($phone, $otpCode, $language);
+        $smsSuccess = $this->sendSms($phone, $otpCode, $language);
+
+        if (!$smsSuccess) {
+            return [
+                'success' => false,
+                'message' => 'Failed to deliver SMS. Please try again.',
+            ];
+        }
 
         return [
             'success' => true,

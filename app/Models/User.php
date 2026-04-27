@@ -102,12 +102,16 @@ class User extends Authenticatable
             ->where(function ($query): void {
                 $query->where(function ($activeQuery): void {
                     $activeQuery->where('status', 'active')
-                        ->whereNotNull('expires_at')
-                        ->where('expires_at', '>=', now());
+                        ->where(function ($q): void {
+                            $q->whereNull('expires_at')
+                              ->orWhere('expires_at', '>=', now());
+                        });
                 })->orWhere(function ($trialQuery): void {
                     $trialQuery->where('status', 'trial')
-                        ->whereNotNull('trial_end')
-                        ->where('trial_end', '>=', now());
+                        ->where(function ($q): void {
+                            $q->whereNull('trial_end')
+                              ->orWhere('trial_end', '>=', now());
+                        });
                 });
             })
             ->latestOfMany('updated_at');
@@ -383,12 +387,16 @@ class User extends Authenticatable
             ->where(function ($query): void {
                 $query->where(function ($activeQuery): void {
                     $activeQuery->where('status', 'active')
-                        ->whereNotNull('expires_at')
-                        ->where('expires_at', '>=', now());
+                        ->where(function ($q): void {
+                            $q->whereNull('expires_at')
+                              ->orWhere('expires_at', '>=', now());
+                        });
                 })->orWhere(function ($trialQuery): void {
                     $trialQuery->where('status', 'trial')
-                        ->whereNotNull('trial_end')
-                        ->where('trial_end', '>=', now());
+                        ->where(function ($q): void {
+                            $q->whereNull('trial_end')
+                              ->orWhere('trial_end', '>=', now());
+                        });
                 });
             })
             ->exists();
