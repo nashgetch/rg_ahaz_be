@@ -98,10 +98,19 @@ class User extends Authenticatable
     public function activeSubscription(): HasOne
     {
         return $this->hasOne(Subscription::class)
-            ->where('status', 'active')
-            ->where('starts_at', '<=', now())
-            ->where('ends_at', '>=', now())
-            ->latestOfMany('ends_at');
+            ->whereIn('status', ['active', 'trial'])
+            ->where(function ($query): void {
+                $query->where(function ($activeQuery): void {
+                    $activeQuery->where('status', 'active')
+                        ->whereNotNull('expires_at')
+                        ->where('expires_at', '>=', now());
+                })->orWhere(function ($trialQuery): void {
+                    $trialQuery->where('status', 'trial')
+                        ->whereNotNull('trial_end')
+                        ->where('trial_end', '>=', now());
+                });
+            })
+            ->latestOfMany('updated_at');
     }
 
     /**
@@ -370,9 +379,18 @@ class User extends Authenticatable
     public function hasActiveSubscription(): bool
     {
         return $this->subscriptions()
-            ->where('status', 'active')
-            ->where('starts_at', '<=', now())
-            ->where('ends_at', '>=', now())
+            ->whereIn('status', ['active', 'trial'])
+            ->where(function ($query): void {
+                $query->where(function ($activeQuery): void {
+                    $activeQuery->where('status', 'active')
+                        ->whereNotNull('expires_at')
+                        ->where('expires_at', '>=', now());
+                })->orWhere(function ($trialQuery): void {
+                    $trialQuery->where('status', 'trial')
+                        ->whereNotNull('trial_end')
+                        ->where('trial_end', '>=', now());
+                });
+            })
             ->exists();
     }
 }

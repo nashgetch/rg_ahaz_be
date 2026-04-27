@@ -47,33 +47,92 @@ class AuthController extends Controller
         }
 
         $language = $request->language ?? 'en';
+        $user = User::where('phone', $phone)->first();
+        $hasActiveSubscription = $user?->hasActiveSubscription() ?? false;
 
-        // Generate 6-digit OTP
-        $otpCode = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+        if (!$hasActiveSubscription) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Subscription is required before sending OTP',
+                'data' => [
+                    'requires_subscription' => true,
+                    'subscription_status' => 'inactive',
+                    'sms_short_code' => '6294',
+                    'sms_body' => 'OK',
+                    'sms_link' => 'sms:6294?body=' . urlencode('OK'),
+                ],
+            ], 403);
+        }
 
-        // Store OTP in database
-        OTP::create([
-            'phone' => $phone,
-            'code' => Hash::make($otpCode),
-            'type' => 'login',
-            'expires_at' => now()->addMinutes(5),
-            'attempts' => 0
-        ]);
+        $otpResult = $this->issueOtp($phone, $language);
 
-        // In production, integrate with SMS service (e.g., Twilio, Africa's Talking)
-        // For development, log the OTP
-        Log::info("OTP for {$phone}: {$otpCode}");
-
-        // Send OTP via configured SMS provider
-        $this->sendSms($phone, $otpCode, $language);
+        if (!$otpResult['success']) {
+            return response()->json([
+                'success' => false,
+                'message' => $otpResult['message'],
+            ], 429);
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'OTP sent successfully',
             'data' => [
                 'phone' => $phone,
-                'expires_in' => 300 // 5 minutes
+                'expires_in' => 300
             ]
+        ]);
+    }
+
+    /**
+     * Check subscription and optionally auto-send OTP when eligible.
+     */
+    public function subscriptionStatus(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'phone' => 'required|string|min:10|max:13',
+            'language' => 'sometimes|string|in:en,am,or',
+            'send_otp' => 'sometimes|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid phone number format',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $phone = $this->normalizePhone($request->phone);
+        if (!$this->isValidEthiopianPhone($phone)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid Ethiopian phone number format',
+            ], 422);
+        }
+
+        $user = User::where('phone', $phone)->first();
+        $hasActiveSubscription = $user?->hasActiveSubscription() ?? false;
+        $latestSubscription = $user?->subscriptions()->latest('updated_at')->first();
+        $subscriptionStatus = $latestSubscription?->status ?? 'inactive';
+        $otpSent = false;
+
+        if ($hasActiveSubscription && $request->boolean('send_otp', false)) {
+            $result = $this->issueOtp($phone, $request->input('language', 'en'));
+            $otpSent = $result['success'];
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'phone' => $phone,
+                'subscription_status' => $subscriptionStatus,
+                'has_active_subscription' => $hasActiveSubscription,
+                'can_play' => $hasActiveSubscription,
+                'otp_sent' => $otpSent,
+                'sms_short_code' => '6294',
+                'sms_body' => 'OK',
+                'sms_link' => 'sms:6294?body=' . urlencode('OK'),
+            ],
         ]);
     }
 
@@ -268,6 +327,44 @@ class AuthController extends Controller
                 'result' => $sendResult,
             ]);
         }
+    }
+
+    /**
+     * Create and send OTP with lightweight resend throttling.
+     *
+     * @return array{success: bool, message: string}
+     */
+    private function issueOtp(string $phone, string $language): array
+    {
+        $recentOtp = OTP::where('phone', $phone)
+            ->where('created_at', '>=', now()->subSeconds(45))
+            ->latest()
+            ->first();
+
+        if ($recentOtp) {
+            return [
+                'success' => false,
+                'message' => 'Please wait a few seconds before requesting another code.',
+            ];
+        }
+
+        $otpCode = str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+
+        OTP::create([
+            'phone' => $phone,
+            'code' => Hash::make($otpCode),
+            'type' => 'login',
+            'expires_at' => now()->addMinutes(5),
+            'attempts' => 0,
+        ]);
+
+        Log::info("OTP for {$phone}: {$otpCode}");
+        $this->sendSms($phone, $otpCode, $language);
+
+        return [
+            'success' => true,
+            'message' => 'OTP sent successfully',
+        ];
     }
 
     /**

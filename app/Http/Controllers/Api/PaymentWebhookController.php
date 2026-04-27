@@ -8,8 +8,10 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class PaymentWebhookController extends Controller
 {
@@ -26,13 +28,18 @@ class PaymentWebhookController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'phone' => 'required|string',
-            'status' => 'required|string|in:paid,success',
-            'provider_reference' => 'required|string|max:191',
-            'external_reference' => 'nullable|string|max:191',
-            'amount_etb' => 'nullable|numeric|min:0',
-            'paid_at' => 'nullable|date',
-            'tokens' => 'nullable|integer|min:1',
+            'type' => 'required|string|in:new_subscription,update_subscription',
+            'data' => 'required|array',
+            'data.id' => 'required|string|max:191',
+            'data.status' => 'required|string|in:active,pending,inactive,cancelled,trial,expired',
+            'data.phone' => 'required|string|max:20',
+            'data.trial_end' => 'nullable|date',
+            'data.activation_date' => 'nullable|date',
+            'data.expires_at' => 'nullable|date',
+            'data.package_id' => 'nullable|string|max:191',
+            'data.method_id' => 'nullable|string|max:191',
+            'data.inserted_at' => 'nullable|date',
+            'data.updated_at' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -43,66 +50,103 @@ class PaymentWebhookController extends Controller
             ], 422);
         }
 
-        $phone = $this->normalizePhone((string) $request->input('phone'));
+        $subscriptionData = (array) $request->input('data', []);
+        $phone = $this->normalizePhone((string) ($subscriptionData['phone'] ?? ''));
         $user = User::where('phone', $phone)->first();
-
         if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'User not found for provided phone',
-            ], 404);
-        }
-
-        $providerReference = (string) $request->input('provider_reference');
-        $alreadyProcessed = Subscription::where('provider_reference', $providerReference)->exists();
-        if ($alreadyProcessed) {
-            return response()->json([
-                'success' => true,
-                'message' => 'Payment already processed',
-            ]);
-        }
-
-        $tokensToAward = (int) ($request->integer('tokens') ?: env('SUBSCRIPTION_DAILY_TOKENS', 20));
-        $amountEtb = (float) ($request->input('amount_etb') ?? env('SUBSCRIPTION_DAILY_PRICE_ETB', 2));
-        $paidAt = $request->filled('paid_at') ? Carbon::parse((string) $request->input('paid_at')) : now();
-
-        DB::transaction(function () use ($user, $phone, $request, $providerReference, $tokensToAward, $amountEtb, $paidAt): void {
-            $currentActive = $user->subscriptions()
-                ->where('status', 'active')
-                ->where('ends_at', '>=', now())
-                ->latest('ends_at')
-                ->first();
-
-            $startsAt = $currentActive ? $currentActive->ends_at->copy() : $paidAt->copy();
-            $endsAt = $startsAt->copy()->addDay();
-
-            Subscription::create([
-                'user_id' => $user->id,
+            $user = User::create([
                 'phone' => $phone,
-                'status' => 'active',
-                'provider_reference' => $providerReference,
-                'external_reference' => $request->input('external_reference'),
-                'amount_etb' => $amountEtb,
-                'tokens_awarded' => $tokensToAward,
-                'starts_at' => $startsAt,
-                'ends_at' => $endsAt,
-                'paid_at' => $paidAt,
-                'raw_payload' => $request->all(),
+                'name' => 'Subscriber' . substr(preg_replace('/\D/', '', $phone), -6),
+                'password' => Hash::make(Str::random(32)),
+                'locale' => 'en',
+                'tokens_balance' => 0,
+                'daily_bonus_claimed_at' => null,
             ]);
+        }
 
-            $user->awardTokens($tokensToAward, 'purchase', 'Daily subscription payment reward', [
-                'provider_reference' => $providerReference,
-                'amount_etb' => $amountEtb,
-                'paid_at' => $paidAt->toIso8601String(),
-            ]);
+        $subscriptionExternalId = (string) ($subscriptionData['id'] ?? '');
+        $status = (string) ($subscriptionData['status'] ?? 'pending');
+        $activationDate = !empty($subscriptionData['activation_date']) ? Carbon::parse((string) $subscriptionData['activation_date']) : null;
+        $trialEnd = !empty($subscriptionData['trial_end']) ? Carbon::parse((string) $subscriptionData['trial_end']) : null;
+        $expiresAt = !empty($subscriptionData['expires_at']) ? Carbon::parse((string) $subscriptionData['expires_at']) : null;
+        $insertedAt = !empty($subscriptionData['inserted_at']) ? Carbon::parse((string) $subscriptionData['inserted_at']) : now();
+        $updatedAt = !empty($subscriptionData['updated_at']) ? Carbon::parse((string) $subscriptionData['updated_at']) : now();
+        $tokensToAward = (int) env('SUBSCRIPTION_DAILY_TOKENS', 20);
+
+        DB::transaction(function () use ($request, $user, $phone, $subscriptionExternalId, $status, $activationDate, $trialEnd, $expiresAt, $insertedAt, $updatedAt, $tokensToAward): void {
+            $subscription = Subscription::query()->updateOrCreate(
+                ['subscription_id' => $subscriptionExternalId],
+                [
+                    'user_id' => $user->id,
+                    'subscription_id' => $subscriptionExternalId,
+                    'provider_subscription_id' => $subscriptionExternalId,
+                    'event_type' => (string) $request->input('type'),
+                    'phone' => $phone,
+                    'status' => $status,
+                    'package_id' => $request->input('data.package_id'),
+                    'method_id' => $request->input('data.method_id'),
+                    'trial_end' => $trialEnd,
+                    'activation_date' => $activationDate,
+                    'expires_at' => $expiresAt,
+                    'active_on_date' => ($activationDate ?? $insertedAt)->toDateString(),
+                    'provider_reference' => $subscriptionExternalId,
+                    'amount_etb' => (float) env('SUBSCRIPTION_DAILY_PRICE_ETB', 2),
+                    'tokens_awarded' => 0,
+                    'starts_at' => $activationDate ?? $insertedAt,
+                    'ends_at' => $expiresAt ?? $trialEnd ?? now(),
+                    'paid_at' => $activationDate,
+                    'raw_payload' => $request->all(),
+                    'created_at' => $insertedAt,
+                    'updated_at' => $updatedAt,
+                ]
+            );
+
+            $isEligible = in_array($status, ['active', 'trial'], true);
+            $shouldAward = $isEligible && ($request->input('type') === 'new_subscription');
+
+            if ($shouldAward) {
+                $alreadyAwarded = $user->transactions()
+                    ->where('type', 'purchase')
+                    ->where('reference', 'sub:' . $subscriptionExternalId)
+                    ->exists();
+
+                if (!$alreadyAwarded) {
+                    $user->increment('tokens_balance', $tokensToAward);
+                    $user->transactions()->create([
+                        'amount' => $tokensToAward,
+                        'type' => 'purchase',
+                        'description' => 'Subscription activation reward',
+                        'meta' => [
+                            'subscription_id' => $subscriptionExternalId,
+                            'status' => $status,
+                        ],
+                        'status' => 'completed',
+                        'reference' => 'sub:' . $subscriptionExternalId,
+                    ]);
+
+                    $subscription->update(['tokens_awarded' => $tokensToAward]);
+                }
+            } else {
+                $alreadyAwarded = $user->transactions()
+                    ->where('type', 'purchase')
+                    ->where('reference', 'sub:' . $subscriptionExternalId)
+                    ->exists();
+
+                if ($alreadyAwarded) {
+                    $subscription->update(['tokens_awarded' => $tokensToAward]);
+                } else {
+                    $subscription->update(['tokens_awarded' => 0]);
+                }
+            }
         });
 
         return response()->json([
             'success' => true,
-            'message' => 'Payment processed and subscription saved',
+            'message' => 'Subscription callback processed successfully',
             'data' => [
                 'phone' => $phone,
-                'tokens_awarded' => $tokensToAward,
+                'subscription_id' => $subscriptionExternalId,
+                'status' => $status,
                 'has_active_subscription' => $user->fresh()->hasActiveSubscription(),
             ],
         ]);

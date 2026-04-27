@@ -34,6 +34,7 @@ Route::post('/pay', [PaymentWebhookController::class, 'pay']);
 Route::prefix('v1')->group(function () {
     // Authentication
     Route::post('/auth/send-otp', [AuthController::class, 'sendOtp']);
+    Route::post('/auth/subscription-status', [AuthController::class, 'subscriptionStatus']);
     Route::post('/auth/verify-otp', [AuthController::class, 'verifyOtp']);
     Route::post('/auth/refresh', [AuthController::class, 'refresh']);
     
