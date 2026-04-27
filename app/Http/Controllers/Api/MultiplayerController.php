@@ -959,12 +959,13 @@ class MultiplayerController extends Controller
             $participant->markFinished($request->final_score);
         }
         
-        // Award regular game tokens to winner (separate from betting)
-        if ($completionResult['completed'] && $completionResult['winner']) {
+        // Award regular game tokens only when there is no betting pot.
+        // Betting games already settle winnings through StrictBettingService.
+        if ($completionResult['completed'] && $completionResult['winner'] && !$room->has_active_bets) {
             $winner = $completionResult['winner'];
             $tokensAwarded = min(5, $winner->score / 100); // Cap at 5 tokens
             if ($tokensAwarded > 0) {
-                $winner->user->awardTokens($tokensAwarded, 'prize', "Multiplayer {$room->game->title} Winner");
+                $winner->user->awardTokens((int) $tokensAwarded, 'prize', "Multiplayer {$room->game->title} Winner");
             }
         }
 

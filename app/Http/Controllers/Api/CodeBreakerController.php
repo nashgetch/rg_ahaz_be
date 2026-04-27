@@ -127,12 +127,25 @@ class CodeBreakerController extends Controller
             // Auto-complete the round for consistency
             if (!$round->completed_at) {
                 $completionTime = $round->started_at->diffInSeconds(now());
+                $rewardTokens = $result['is_solved'] ? $round->game->calculateReward((int) $round->score) : 0;
+                $experienceGained = $result['is_solved'] ? min(10, max(5, (int) floor($round->score / 100))) : 0;
                 
                 $round->update([
                     'completed_at' => now(),
                     'status' => 'completed',
-                    'completion_time' => $completionTime
+                    'completion_time' => $completionTime,
+                    'reward_tokens' => $rewardTokens,
+                    'experience_gained' => $experienceGained
                 ]);
+
+                if ($rewardTokens > 0) {
+                    $request->user()->awardTokens($rewardTokens, 'prize', 'Code Breaker game reward', [
+                        'game_id' => $round->game_id,
+                        'round_id' => $round->id,
+                        'score' => $round->score,
+                    ]);
+                    $request->user()->addExperience($experienceGained);
+                }
                 
                 // Update leaderboards when round is auto-completed
                 $historicalLeaderboardService = app(HistoricalLeaderboardService::class);
@@ -140,6 +153,10 @@ class CodeBreakerController extends Controller
                 
                 // Include secret code in response when game ends
                 $responseData['secret_code'] = $gameData['secret_code'];
+                $responseData['tokens_earned'] = $rewardTokens;
+                $responseData['experience_gained'] = $experienceGained;
+                $responseData['user_tokens'] = $request->user()->fresh()->tokens_balance;
+                $responseData['user_earned_tokens'] = $request->user()->fresh()->earned_tokens_balance;
             }
         }
 

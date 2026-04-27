@@ -44,6 +44,7 @@ Route::prefix('v1')->group(function () {
     
     // Public leaderboards (available without authentication)
     Route::get('/leaderboards', [LeaderboardController::class, 'index']);
+    Route::get('/leaderboards/all', [LeaderboardController::class, 'index']);
     Route::get('/leaderboards/games/{game}', [LeaderboardController::class, 'gameLeaderboard']);
     Route::get('/leaderboards/games/{game}/periods', [LeaderboardController::class, 'gamePeriods']);
     Route::get('/leaderboards/top-players', [LeaderboardController::class, 'topPlayers']);
@@ -215,6 +216,7 @@ Route::post('/debug/ping-websocket', function (Request $request) {
 Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // User management
     Route::get('/user', [UserController::class, 'profile']);
+    Route::get('/users/{user}', [UserController::class, 'show']);
     Route::put('/user', [UserController::class, 'updateProfile']);
     Route::post('/user/claim-daily-bonus', [UserController::class, 'claimDailyBonus']);
     Route::get('/user/badge', [UserController::class, 'badge']);

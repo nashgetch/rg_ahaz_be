@@ -40,6 +40,24 @@ class UserController extends Controller
     }
 
     /**
+     * Get specific user profile
+     */
+    public function show(\App\Models\User $user): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'level' => $user->level ?? 1,
+                'experience' => $user->experience ?? 0,
+                'created_at' => $user->created_at,
+                'avatar' => $user->avatar ?? null
+            ]
+        ]);
+    }
+
+    /**
      * Update user profile
      */
     public function updateProfile(Request $request): JsonResponse

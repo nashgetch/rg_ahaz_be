@@ -1238,28 +1238,26 @@ class MultiplayerCrazyController extends Controller
                         $user = $p->user;
                         $betAmount = $originalBetAmounts[$user->id] ?? 0;
 
-                        if ($user->id !== $winnerParticipant->user_id && $betAmount > 0) {
+                        if ($betAmount > 0) {
                             $balanceBefore = $user->tokens_balance;
                             
-                            // Deduct tokens from loser and keep earned-token ledger in sync.
+                            // Deduct every participant's stake; the winner already received the full pot above.
                             $user->spendTokens(
                                 $betAmount,
-                                "Multiplayer Crazy loss in room {$room->room_code}",
-                                ['room_code' => $room->room_code, 'bet_loss' => true]
+                                "Multiplayer Crazy stake in room {$room->room_code}",
+                                [
+                                    'room_code' => $room->room_code,
+                                    'bet_stake' => true,
+                                    'is_winner' => $user->id === $winnerParticipant->user_id,
+                                ]
                             );
-                            Log::info("Deducted tokens from loser", [
+                            Log::info("Deducted Crazy bet stake from participant", [
                                 'user_id' => $user->id, 
                                 'amount' => $betAmount, 
                                 'room' => $room->room_code,
                                 'balance_before' => $balanceBefore,
-                                'balance_after' => $user->fresh()->tokens_balance
-                            ]);
-                        } else if ($user->id === $winnerParticipant->user_id) {
-                            Log::info("Winner's bet NOT deducted (winner-takes-all)", [
-                                'user_id' => $user->id, 
-                                'bet_amount' => $betAmount, 
-                                'room' => $room->room_code,
-                                'note' => 'Winner keeps their bet + gets full pot'
+                                'balance_after' => $user->fresh()->tokens_balance,
+                                'is_winner' => $user->id === $winnerParticipant->user_id,
                             ]);
                         }
                         

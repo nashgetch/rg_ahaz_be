@@ -128,7 +128,7 @@ class PaymentWebhookController extends Controller
                 );
 
                 $isEligible = in_array($status, ['active', 'trial'], true);
-                $shouldAward = $isEligible && ($request->input('type') === 'new_subscription');
+                $shouldAward = $isEligible;
 
                 if ($shouldAward) {
                     $alreadyAwarded = $user->transactions()

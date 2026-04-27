@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MultiplayerRoom;
 use App\Models\MultiplayerParticipant;
+use App\Models\User;
 use App\Services\StrictBettingService;
 use App\Events\CodebreakerGameUpdated;
 use App\Events\MultiplayerRoomUpdated;
@@ -864,6 +865,19 @@ class MultiplayerCodeBreakerController extends Controller
             
             // Determine winner (highest ranked player)
             $winner = $leaderboard->isNotEmpty() ? $leaderboard->first() : null;
+
+            if (!$room->has_active_bets && $winner && !empty($winner['user_id'])) {
+                $winnerUser = User::find($winner['user_id']);
+                $tokensAwarded = min(5, ((int) ($winner['score'] ?? 0)) / 100);
+                if ($winnerUser && $tokensAwarded > 0) {
+                    $winnerUser->awardTokens(
+                        (int) $tokensAwarded,
+                        'prize',
+                        "Multiplayer CodeBreaker winner from room {$room->room_code}",
+                        ['room_code' => $room->room_code]
+                    );
+                }
+            }
 
             // Generate battle history
             $battleHistory = $this->generateBattleHistory($room, $leaderboard);

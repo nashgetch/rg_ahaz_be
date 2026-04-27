@@ -279,7 +279,7 @@ class StrictBettingService
                 if ($reimbursementAmount > 0) {
                     $participant->user->awardTokens(
                         $reimbursementAmount,
-                        'bet_reimbursement',
+                        'refund',
                         "Bet reimbursement from abandoned game {$room->room_code}"
                     );
                 }
@@ -316,7 +316,7 @@ class StrictBettingService
         if ($totalWinnings > 0) {
             $winner->user->awardTokens(
                 $totalWinnings,
-                'bet_winnings',
+                'prize',
                 "Winner takes all from room {$room->room_code}"
             );
             
@@ -370,7 +370,7 @@ class StrictBettingService
         if ($totalPool > 0) {
             $winner->user->awardTokens(
                 $totalPool,
-                'bet_winnings',
+                'prize',
                 "Multiplayer winner from room {$room->room_code}"
             );
             
@@ -466,7 +466,7 @@ class StrictBettingService
             if ($totalAbandonedBets > 0) {
                 $lastPlayer->user->awardTokens(
                     $totalAbandonedBets,
-                    'abandonment_reward',
+                    'prize',
                     "Reward for staying in game while others abandoned - room {$room->room_code}"
                 );
 

@@ -323,7 +323,18 @@ class LeaderboardController extends Controller
      */
     public function playerStats(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $userId = $request->get('player_id');
+        if ($userId) {
+            $user = \App\Models\User::find($userId);
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Player not found'
+                ], 404);
+            }
+        } else {
+            $user = $request->user();
+        }
 
         $cacheKey = "leaderboards:stats:user:{$user->id}";
 
@@ -377,6 +388,13 @@ class LeaderboardController extends Controller
             ];
 
             return [
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'level' => $user->level ?? 1,
+                    'avatar' => $user->avatar ?? null,
+                    'created_at' => $user->created_at,
+                ],
                 'overall' => $overallStats,
                 'by_game' => $currentStats->toArray()
             ];
