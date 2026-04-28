@@ -174,15 +174,16 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Increment attempts
-        $otp->increment('attempts');
-
         // Verify OTP
         // TEMPORARY: Allow last 6 digits of phone number as OTP for testing
         $lastSixDigits = substr(preg_replace('/[^\d]/', '', $phone), -6);
         $isValidOtp = Hash::check($otpCode, $otp->code) || $otpCode === $lastSixDigits;
         
         if (!$isValidOtp) {
+            // Increment attempts only for invalid OTP submissions.
+            $otp->increment('attempts');
+            $otp->refresh();
+
             if ($otp->attempts >= 3) {
                 $otp->update(['consumed_at' => now()]); // Block further attempts
             }
@@ -194,17 +195,43 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Mark OTP as consumed
-        $otp->update(['consumed_at' => now()]);
-
         // Find or create user
         $user = User::where('phone', $phone)->first();
         $isNewUser = false;
 
         if (!$user) {
+            $usernameValidation = Validator::make($request->all(), [
+                'name' => 'required|string|min:3|max:20|regex:/^[a-zA-Z0-9_]+$/',
+            ]);
+
+            if ($usernameValidation->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Username is required for new users and must be 3-20 characters (letters, numbers, underscores).',
+                    'data' => [
+                        'requires_username' => true,
+                    ],
+                    'errors' => $usernameValidation->errors(),
+                ], 422);
+            }
+
+            $requestedName = trim((string) $request->name);
+            $usernameTaken = User::whereRaw('LOWER(name) = ?', [Str::lower($requestedName)])
+                ->exists();
+
+            if ($usernameTaken) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Username is already taken.',
+                    'data' => [
+                        'requires_username' => true,
+                    ],
+                ], 422);
+            }
+
             $user = User::create([
                 'phone' => $phone,
-                'name' => $this->generateUniqueUsername(),
+                'name' => $requestedName,
                 'password' => Hash::make(Str::random(32)), // Generate random password for phone-based auth
                 'locale' => $request->language ?? 'en',
                 'tokens_balance' => 100, // Welcome bonus
@@ -212,6 +239,9 @@ class AuthController extends Controller
             ]);
             $isNewUser = true;
         }
+
+        // Mark OTP as consumed only after all validations and user creation succeed.
+        $otp->update(['consumed_at' => now()]);
 
         // Generate token
         $token = $user->createToken('GameHub-ET')->plainTextToken;
@@ -391,43 +421,4 @@ class AuthController extends Controller
         return preg_match('/^\+251[79]\d{8}$/', $phone);
     }
 
-    /**
-     * Generate a unique username for new users
-     */
-    private function generateUniqueUsername(): string
-    {
-        $adjectives = [
-            'Swift', 'Brave', 'Smart', 'Quick', 'Mighty', 'Sharp', 'Epic', 'Bold', 
-            'Strong', 'Fast', 'Cool', 'Elite', 'Pro', 'Super', 'Fire', 'Thunder',
-            'Royal', 'Golden', 'Silver', 'Diamond', 'Flash', 'Storm', 'Phoenix', 'Eagle'
-        ];
-        
-        $nouns = [
-            'Lion', 'Tiger', 'Wolf', 'Bear', 'Fox', 'Hawk', 'Dragon', 'Warrior',
-            'Knight', 'Hunter', 'Ninja', 'Ranger', 'Champion', 'Master', 'Legend',
-            'Hero', 'King', 'Queen', 'Prince', 'Star', 'Comet', 'Thunder', 'Storm'
-        ];
-
-        $maxAttempts = 50;
-        $attempt = 0;
-
-        do {
-            $adjective = $adjectives[array_rand($adjectives)];
-            $noun = $nouns[array_rand($nouns)];
-            $number = rand(10, 999);
-            $username = $adjective . $noun . $number;
-            
-            $attempt++;
-            
-            // Check if username exists
-            $exists = User::where('name', $username)->exists();
-            
-            if (!$exists) {
-                return $username;
-            }
-        } while ($attempt < $maxAttempts);
-
-        // Fallback if all attempts failed (very unlikely)
-        return 'Player' . time() . rand(10, 99);
-    }
 } 
