@@ -353,7 +353,7 @@ class AuthController extends Controller
 
         $otpCode = str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
 
-        OTP::create([
+        $otpRecord = OTP::create([
             'phone' => $phone,
             'code' => Hash::make($otpCode),
             'type' => 'login',
@@ -365,6 +365,10 @@ class AuthController extends Controller
         $smsSuccess = $this->sendSms($phone, $otpCode, $language);
 
         if (!$smsSuccess) {
+            // Important: remove freshly-created OTP when SMS delivery fails.
+            // Otherwise retry attempts get blocked by throttling without hitting SMS API.
+            $otpRecord->delete();
+
             return [
                 'success' => false,
                 'message' => 'Failed to deliver SMS. Please try again.',

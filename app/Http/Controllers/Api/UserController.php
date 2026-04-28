@@ -35,7 +35,6 @@ class UserController extends Controller
                 'last_daily_bonus' => $user->daily_bonus_claimed_at,
                 'created_at' => $user->created_at,
                 'avatar' => $user->avatar ?? null,
-                'has_active_subscription' => $user->hasActiveSubscription(),
                 'has_active_subscription' => $user->hasActiveSubscription()
             ]
         ]);
