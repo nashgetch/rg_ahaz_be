@@ -162,6 +162,7 @@ class AuthController extends Controller
         $phone = $this->normalizePhone($request->phone);
         $otpCode = $request->otp;
         $deviceName = trim((string) $request->input('device_name', 'Unknown device'));
+        $currentIp = (string) ($request->ip() ?? '');
         if ($deviceName === '') {
             $deviceName = 'Unknown device';
         }
@@ -257,6 +258,7 @@ class AuthController extends Controller
                     'requires_session_replace' => true,
                     'active_device' => [
                         'name' => $user->active_device_name ?: $activeToken->name,
+                        'ip' => $user->active_device_ip,
                         'last_seen_at' => optional($activeToken->last_used_at ?? $activeToken->created_at)?->toISOString(),
                     ],
                 ],
@@ -276,6 +278,7 @@ class AuthController extends Controller
         $user->forceFill([
             'last_login_at' => now(),
             'active_device_name' => $deviceName,
+            'active_device_ip' => $currentIp !== '' ? $currentIp : null,
             'active_device_token_id' => $tokenModel->accessToken->id,
             'active_device_last_seen_at' => now(),
         ])->save();
@@ -320,6 +323,7 @@ class AuthController extends Controller
         $token = $newToken->plainTextToken;
         $user->forceFill([
             'active_device_name' => $tokenName,
+            'active_device_ip' => (string) ($request->ip() ?? ''),
             'active_device_token_id' => $newToken->accessToken->id,
             'active_device_last_seen_at' => now(),
         ])->save();
@@ -358,6 +362,7 @@ class AuthController extends Controller
         if (!$hasRemainingTokens) {
             $user->forceFill([
                 'active_device_name' => null,
+                'active_device_ip' => null,
                 'active_device_token_id' => null,
                 'active_device_last_seen_at' => null,
             ])->save();

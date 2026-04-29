@@ -40,6 +40,7 @@ class User extends Authenticatable
         'last_login_at',
         'daily_bonus_claimed_at',
         'active_device_name',
+        'active_device_ip',
         'active_device_token_id',
         'active_device_last_seen_at',
         'preferences',
