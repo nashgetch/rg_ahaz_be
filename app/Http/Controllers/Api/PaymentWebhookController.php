@@ -100,32 +100,46 @@ class PaymentWebhookController extends Controller
             $tokensToAward = (int) env('SUBSCRIPTION_DAILY_TOKENS', 100);
 
             DB::transaction(function () use ($request, $user, $phone, $subscriptionExternalId, $status, $activationDate, $trialEnd, $expiresAt, $insertedAt, $updatedAt, $tokensToAward): void {
-                $subscription = Subscription::query()->updateOrCreate(
-                    ['subscription_id' => $subscriptionExternalId],
-                    [
-                        'user_id' => $user->id,
-                        'subscription_id' => $subscriptionExternalId,
-                        'provider_subscription_id' => $subscriptionExternalId,
-                        'event_type' => (string) $request->input('type'),
-                        'phone' => $phone,
-                        'status' => $status,
-                        'package_id' => $request->input('data.package_id'),
-                        'method_id' => $request->input('data.method_id'),
-                        'trial_end' => $trialEnd,
-                        'activation_date' => $activationDate,
-                        'expires_at' => $expiresAt,
-                        'active_on_date' => ($activationDate ?? $insertedAt)->toDateString(),
-                        'provider_reference' => $subscriptionExternalId,
-                        'amount_etb' => (float) env('SUBSCRIPTION_DAILY_PRICE_ETB', 2),
-                        'tokens_awarded' => 0,
-                        'starts_at' => $activationDate ?? $insertedAt,
-                        'ends_at' => $expiresAt ?? $trialEnd ?? now(),
-                        'paid_at' => $activationDate,
-                        'raw_payload' => $request->all(),
+                $subscriptionValues = [
+                    'user_id' => $user->id,
+                    'subscription_id' => $subscriptionExternalId,
+                    'provider_subscription_id' => $subscriptionExternalId,
+                    'event_type' => (string) $request->input('type'),
+                    'phone' => $phone,
+                    'status' => $status,
+                    'package_id' => $request->input('data.package_id'),
+                    'method_id' => $request->input('data.method_id'),
+                    'trial_end' => $trialEnd,
+                    'activation_date' => $activationDate,
+                    'expires_at' => $expiresAt,
+                    'active_on_date' => ($activationDate ?? $insertedAt)->toDateString(),
+                    'provider_reference' => $subscriptionExternalId,
+                    'amount_etb' => (float) env('SUBSCRIPTION_DAILY_PRICE_ETB', 2),
+                    'tokens_awarded' => 0,
+                    'starts_at' => $activationDate ?? $insertedAt,
+                    'ends_at' => $expiresAt ?? $trialEnd ?? now(),
+                    'paid_at' => $activationDate,
+                    'raw_payload' => $request->all(),
+                    'updated_at' => $updatedAt,
+                ];
+
+                // Make webhook idempotent across new/update events for the same provider subscription id.
+                // Prefer matching by unique provider_reference, and fall back to legacy columns if needed.
+                $subscription = Subscription::query()
+                    ->where('provider_reference', $subscriptionExternalId)
+                    ->orWhere('subscription_id', $subscriptionExternalId)
+                    ->orWhere('provider_subscription_id', $subscriptionExternalId)
+                    ->first();
+
+                if ($subscription) {
+                    $subscription->fill($subscriptionValues);
+                    $subscription->save();
+                } else {
+                    $subscription = Subscription::query()->create([
+                        ...$subscriptionValues,
                         'created_at' => $insertedAt,
-                        'updated_at' => $updatedAt,
-                    ]
-                );
+                    ]);
+                }
 
                 $isEligible = in_array($status, ['active', 'trial'], true);
                 $shouldAward = $isEligible;
