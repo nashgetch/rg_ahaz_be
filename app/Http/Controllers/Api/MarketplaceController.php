@@ -7,14 +7,20 @@ use App\Models\MarketplaceItem;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserMarketplacePurchase;
+use App\Services\SmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class MarketplaceController extends Controller
 {
+    public function __construct(private readonly SmsService $smsService)
+    {
+    }
+
     public function items(): JsonResponse
     {
         $items = MarketplaceItem::query()
@@ -152,6 +158,7 @@ class MarketplaceController extends Controller
         });
 
         [$createdPurchase, $updatedUser] = $purchase;
+        $this->sendMarketplaceRedemptionSms($updatedUser, $createdPurchase);
 
         return response()->json([
             'success' => true,
@@ -184,5 +191,29 @@ class MarketplaceController extends Controller
     private function generatePurchaseReference(): string
     {
         return 'MKP-' . now()->format('YmdHis') . '-' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+    }
+
+    private function sendMarketplaceRedemptionSms(User $user, UserMarketplacePurchase $purchase): void
+    {
+        if (empty($user->phone) || empty($purchase->item?->name)) {
+            return;
+        }
+
+        $isAmharic = ($user->locale ?? 'en') === 'am';
+        $message = $isAmharic
+            ? "እንኳን ደስ አለዎት! {$purchase->item->name} ሽልማትዎን በተሳካ ሁኔታ ተቀብለዋል። አመሰግናለን - AHAZ"
+            : "Congratulations! You successfully redeemed {$purchase->item->name}. Thank you for playing on AHAZ.";
+
+        $smsResult = $this->smsService->sendOtp($user->phone, $message);
+        if (!($smsResult['success'] ?? false)) {
+            Log::warning('Marketplace redemption SMS failed.', [
+                'user_id' => $user->id,
+                'phone' => $user->phone,
+                'purchase_id' => $purchase->id,
+                'reference' => $purchase->reference,
+                'item_name' => $purchase->item?->name,
+                'sms_result' => $smsResult,
+            ]);
+        }
     }
 }

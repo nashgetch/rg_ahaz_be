@@ -39,6 +39,9 @@ class User extends Authenticatable
         'locked_bet_tokens',
         'last_login_at',
         'daily_bonus_claimed_at',
+        'active_device_name',
+        'active_device_token_id',
+        'active_device_last_seen_at',
         'preferences',
     ];
 
@@ -65,6 +68,7 @@ class User extends Authenticatable
         'locked_bet_tokens' => 'decimal:2',
         'last_login_at' => 'datetime',
         'daily_bonus_claimed_at' => 'datetime',
+        'active_device_last_seen_at' => 'datetime',
         'preferences' => 'array',
     ];
 
@@ -216,7 +220,7 @@ class User extends Authenticatable
 
         $this->update(['daily_bonus_claimed_at' => now()]);
         
-        $bonusAmount = config('games.daily_bonus_tokens', 20);
+        $bonusAmount = config('games.daily_bonus_tokens', 10);
         
         return $this->awardTokens(
             $bonusAmount,

@@ -97,7 +97,7 @@ class PaymentWebhookController extends Controller
             $expiresAt = !empty($subscriptionData['expires_at']) ? Carbon::parse((string) $subscriptionData['expires_at']) : null;
             $insertedAt = !empty($subscriptionData['inserted_at']) ? Carbon::parse((string) $subscriptionData['inserted_at']) : now();
             $updatedAt = !empty($subscriptionData['updated_at']) ? Carbon::parse((string) $subscriptionData['updated_at']) : now();
-            $tokensToAward = (int) env('SUBSCRIPTION_DAILY_TOKENS', 20);
+            $tokensToAward = (int) env('SUBSCRIPTION_DAILY_TOKENS', 100);
 
             DB::transaction(function () use ($request, $user, $phone, $subscriptionExternalId, $status, $activationDate, $trialEnd, $expiresAt, $insertedAt, $updatedAt, $tokensToAward): void {
                 $subscription = Subscription::query()->updateOrCreate(

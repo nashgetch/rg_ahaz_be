@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthController extends Controller
 {
@@ -145,7 +146,9 @@ class AuthController extends Controller
             'phone' => 'required|string',
             'otp' => 'required|string|size:6',
             'name' => 'sometimes|string|max:255',
-            'language' => 'sometimes|string|in:en,am,or'
+            'language' => 'sometimes|string|in:en,am,or',
+            'device_name' => 'sometimes|string|max:120',
+            'replace_existing_session' => 'sometimes|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -158,6 +161,10 @@ class AuthController extends Controller
 
         $phone = $this->normalizePhone($request->phone);
         $otpCode = $request->otp;
+        $deviceName = trim((string) $request->input('device_name', 'Unknown device'));
+        if ($deviceName === '') {
+            $deviceName = 'Unknown device';
+        }
 
         // Find valid OTP
         $otp = OTP::where('phone', $phone)
@@ -240,11 +247,38 @@ class AuthController extends Controller
             $isNewUser = true;
         }
 
+        $replaceExistingSession = $request->boolean('replace_existing_session', false);
+        $activeToken = $this->resolveLatestActiveToken($user);
+        if ($activeToken && !$replaceExistingSession) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You already have an active session on another device.',
+                'data' => [
+                    'requires_session_replace' => true,
+                    'active_device' => [
+                        'name' => $user->active_device_name ?: $activeToken->name,
+                        'last_seen_at' => optional($activeToken->last_used_at ?? $activeToken->created_at)?->toISOString(),
+                    ],
+                ],
+            ], 409);
+        }
+
+        if ($activeToken && $replaceExistingSession) {
+            $user->tokens()->delete();
+        }
+
         // Mark OTP as consumed only after all validations and user creation succeed.
         $otp->update(['consumed_at' => now()]);
 
         // Generate token
-        $token = $user->createToken('GameHub-ET')->plainTextToken;
+        $tokenModel = $user->createToken($deviceName);
+        $token = $tokenModel->plainTextToken;
+        $user->forceFill([
+            'last_login_at' => now(),
+            'active_device_name' => $deviceName,
+            'active_device_token_id' => $tokenModel->accessToken->id,
+            'active_device_last_seen_at' => now(),
+        ])->save();
 
         return response()->json([
             'success' => true,
@@ -275,12 +309,20 @@ class AuthController extends Controller
     public function refresh(Request $request): JsonResponse
     {
         $user = $request->user();
+        $currentToken = $request->user()->currentAccessToken();
+        $tokenName = $currentToken?->name ?: ($user->active_device_name ?: 'Current device');
         
         // Revoke current token
-        $request->user()->currentAccessToken()->delete();
+        $currentToken?->delete();
         
         // Create new token
-        $token = $user->createToken('GameHub-ET')->plainTextToken;
+        $newToken = $user->createToken($tokenName);
+        $token = $newToken->plainTextToken;
+        $user->forceFill([
+            'active_device_name' => $tokenName,
+            'active_device_token_id' => $newToken->accessToken->id,
+            'active_device_last_seen_at' => now(),
+        ])->save();
 
         return response()->json([
             'success' => true,
@@ -308,7 +350,18 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        $user = $request->user();
+        $currentToken = $user->currentAccessToken();
+        $currentToken?->delete();
+
+        $hasRemainingTokens = $user->tokens()->exists();
+        if (!$hasRemainingTokens) {
+            $user->forceFill([
+                'active_device_name' => null,
+                'active_device_token_id' => null,
+                'active_device_last_seen_at' => null,
+            ])->save();
+        }
 
         return response()->json([
             'success' => true,
@@ -409,6 +462,14 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'OTP sent successfully',
         ];
+    }
+
+    private function resolveLatestActiveToken(User $user): ?PersonalAccessToken
+    {
+        return $user->tokens()
+            ->orderByDesc('last_used_at')
+            ->orderByDesc('created_at')
+            ->first();
     }
 
     /**
