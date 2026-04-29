@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Database\QueryException;
 
 class PaymentWebhookController extends Controller
 {
@@ -75,10 +76,8 @@ class PaymentWebhookController extends Controller
             $subscriptionData = (array) $request->input('data', []);
             $rawPhone = (string) ($subscriptionData['phone'] ?? '');
             $phone = $this->normalizePhone($rawPhone); // 2519XXXXXXXX
-            $userPhone = '+' . $phone; // users table format
-            $user = User::where('phone', $userPhone)
-                ->orWhere('phone', $phone)
-                ->first();
+            $userPhone = '+' . $phone; // canonical users table format
+            $user = User::whereIn('phone', $this->buildPhoneCandidates($phone))->first();
             if (!$user) {
                 $user = User::create([
                     'phone' => $userPhone,
@@ -123,22 +122,46 @@ class PaymentWebhookController extends Controller
                     'updated_at' => $updatedAt,
                 ];
 
-                // Make webhook idempotent across new/update events for the same provider subscription id.
-                // Prefer matching by unique provider_reference, and fall back to legacy columns if needed.
+                // Race-safe + idempotent persistence:
+                // 1) lock any existing row for this provider reference
+                // 2) create if missing (with duplicate-key fallback for concurrent inserts)
+                // 3) apply incoming state only if it's newer or equal-but-stronger
                 $subscription = Subscription::query()
                     ->where('provider_reference', $subscriptionExternalId)
-                    ->orWhere('subscription_id', $subscriptionExternalId)
-                    ->orWhere('provider_subscription_id', $subscriptionExternalId)
+                    ->lockForUpdate()
                     ->first();
 
+                if (!$subscription) {
+                    try {
+                        $subscription = Subscription::query()->create([
+                            ...$subscriptionValues,
+                            'created_at' => $insertedAt,
+                        ]);
+                    } catch (QueryException $e) {
+                        // Concurrent request inserted first; load and continue as update.
+                        $subscription = Subscription::query()
+                            ->where('provider_reference', $subscriptionExternalId)
+                            ->lockForUpdate()
+                            ->first();
+
+                        if (!$subscription) {
+                            throw $e;
+                        }
+                    }
+                }
+
                 if ($subscription) {
-                    $subscription->fill($subscriptionValues);
-                    $subscription->save();
-                } else {
-                    $subscription = Subscription::query()->create([
-                        ...$subscriptionValues,
-                        'created_at' => $insertedAt,
-                    ]);
+                    $incomingIsPreferred = $this->shouldApplyIncomingState(
+                        (string) $subscription->status,
+                        $subscription->updated_at,
+                        $status,
+                        $updatedAt
+                    );
+
+                    if ($incomingIsPreferred) {
+                        $subscription->fill($subscriptionValues);
+                        $subscription->save();
+                    }
                 }
 
                 $isEligible = in_array($status, ['active', 'trial'], true);
@@ -224,5 +247,67 @@ class PaymentWebhookController extends Controller
         }
 
         return '251' . ltrim($digits, '0');
+    }
+
+    /**
+     * Build possible phone representations used historically in user records.
+     *
+     * @return array<int, string>
+     */
+    private function buildPhoneCandidates(string $normalized251): array
+    {
+        $candidates = [
+            '+' . $normalized251, // +2519XXXXXXXX
+            $normalized251,       // 2519XXXXXXXX
+        ];
+
+        if (str_starts_with($normalized251, '251')) {
+            $local = substr($normalized251, 3); // 9XXXXXXXX
+            if ($local !== '') {
+                $candidates[] = $local;         // 9XXXXXXXX
+                $candidates[] = '0' . $local;   // 09XXXXXXXX
+            }
+        }
+
+        return array_values(array_unique($candidates));
+    }
+
+    private function shouldApplyIncomingState(
+        string $existingStatus,
+        ?Carbon $existingUpdatedAt,
+        string $incomingStatus,
+        Carbon $incomingUpdatedAt
+    ): bool {
+        // Explicit business rule:
+        // never downgrade an already-trial subscription back to pending.
+        if ($existingStatus === 'trial' && $incomingStatus === 'pending') {
+            return false;
+        }
+
+        if (!$existingUpdatedAt) {
+            return true;
+        }
+
+        if ($incomingUpdatedAt->gt($existingUpdatedAt)) {
+            return true;
+        }
+
+        if ($incomingUpdatedAt->lt($existingUpdatedAt)) {
+            return false;
+        }
+
+        // Same timestamp: keep strongest status to avoid trial/active being downgraded by pending.
+        return $this->statusPriority($incomingStatus) >= $this->statusPriority($existingStatus);
+    }
+
+    private function statusPriority(string $status): int
+    {
+        return match ($status) {
+            'active' => 4,
+            'trial' => 3,
+            'pending' => 2,
+            'inactive', 'expired', 'cancelled' => 1,
+            default => 0,
+        };
     }
 }
