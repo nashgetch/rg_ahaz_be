@@ -103,7 +103,7 @@ class User extends Authenticatable
     public function activeSubscription(): HasOne
     {
         return $this->hasOne(Subscription::class)
-            ->whereIn('status', ['active', 'trial'])
+            ->whereIn('status', ['active', 'trial', 'pending'])
             ->where(function ($query): void {
                 $query->where(function ($activeQuery): void {
                     $activeQuery->where('status', 'active')
@@ -113,6 +113,12 @@ class User extends Authenticatable
                         });
                 })->orWhere(function ($trialQuery): void {
                     $trialQuery->where('status', 'trial')
+                        ->where(function ($q): void {
+                            $q->whereNull('trial_end')
+                              ->orWhere('trial_end', '>=', now());
+                        });
+                })->orWhere(function ($pendingQuery): void {
+                    $pendingQuery->where('status', 'pending')
                         ->where(function ($q): void {
                             $q->whereNull('trial_end')
                               ->orWhere('trial_end', '>=', now());
@@ -383,12 +389,12 @@ class User extends Authenticatable
     }
 
     /**
-     * Check whether the user has an active paid subscription.
+     * Check whether the user has subscription access (paid, trial, billing pending, or provider pending).
      */
     public function hasActiveSubscription(): bool
     {
         return $this->subscriptions()
-            ->whereIn('status', ['active', 'trial'])
+            ->whereIn('status', ['active', 'trial', 'pending'])
             ->where(function ($query): void {
                 $query->where(function ($activeQuery): void {
                     $activeQuery->where('status', 'active')
@@ -398,6 +404,12 @@ class User extends Authenticatable
                         });
                 })->orWhere(function ($trialQuery): void {
                     $trialQuery->where('status', 'trial')
+                        ->where(function ($q): void {
+                            $q->whereNull('trial_end')
+                              ->orWhere('trial_end', '>=', now());
+                        });
+                })->orWhere(function ($pendingQuery): void {
+                    $pendingQuery->where('status', 'pending')
                         ->where(function ($q): void {
                             $q->whereNull('trial_end')
                               ->orWhere('trial_end', '>=', now());

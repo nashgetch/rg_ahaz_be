@@ -164,7 +164,9 @@ class PaymentWebhookController extends Controller
                     }
                 }
 
-                $isEligible = in_array($status, ['active', 'trial'], true);
+                $subscription->refresh();
+                $effectiveStatus = strtolower((string) $subscription->status);
+                $isEligible = in_array($effectiveStatus, ['active', 'trial', 'pending'], true);
                 $shouldAward = $isEligible;
 
                 if ($shouldAward) {
@@ -181,7 +183,7 @@ class PaymentWebhookController extends Controller
                             'description' => 'Subscription activation reward',
                             'meta' => [
                                 'subscription_id' => $subscriptionExternalId,
-                                'status' => $status,
+                                'status' => $effectiveStatus,
                             ],
                             'status' => 'completed',
                             'reference' => 'sub:' . $subscriptionExternalId,
@@ -203,13 +205,18 @@ class PaymentWebhookController extends Controller
                 }
             });
 
+            $persistedSubscription = Subscription::query()
+                ->where('provider_reference', $subscriptionExternalId)
+                ->first();
+            $responseStatus = $persistedSubscription?->status ?? $status;
+
             $response = [
                 'success' => true,
                 'message' => 'Subscription callback processed successfully',
                 'data' => [
                     'phone' => $phone,
                     'subscription_id' => $subscriptionExternalId,
-                    'status' => $status,
+                    'status' => $responseStatus,
                     'has_active_subscription' => $user->fresh()->hasActiveSubscription(),
                 ],
             ];
@@ -278,9 +285,10 @@ class PaymentWebhookController extends Controller
         string $incomingStatus,
         Carbon $incomingUpdatedAt
     ): bool {
-        // Explicit business rule:
-        // never downgrade an already-trial subscription back to pending.
-        if ($existingStatus === 'trial' && $incomingStatus === 'pending') {
+        // Never downgrade trial/active → pending when a later webhook echoes pending.
+        $existingStatus = strtolower($existingStatus);
+        $incomingStatus = strtolower($incomingStatus);
+        if (in_array($existingStatus, ['trial', 'active'], true) && $incomingStatus === 'pending') {
             return false;
         }
 
