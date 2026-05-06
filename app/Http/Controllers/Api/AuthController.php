@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\OTP;
+use App\Models\Subscription;
 use App\Services\SmsService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -50,8 +51,9 @@ class AuthController extends Controller
         $language = $request->language ?? 'en';
         $user = User::where('phone', $phone)->first();
         $hasActiveSubscription = $user?->hasActiveSubscription() ?? false;
+        $hasSubscriptionHistory = $this->hasSubscriptionHistoryForPhone($phone);
 
-        if (!$hasActiveSubscription) {
+        if (!$hasActiveSubscription && !$hasSubscriptionHistory) {
             return response()->json([
                 'success' => false,
                 'message' => 'Subscription is required before sending OTP',
@@ -113,11 +115,13 @@ class AuthController extends Controller
 
         $user = User::where('phone', $phone)->first();
         $hasActiveSubscription = $user?->hasActiveSubscription() ?? false;
-        $latestSubscription = $user?->subscriptions()->latest('updated_at')->first();
+        $latestSubscription = $this->latestSubscriptionForPhone($phone, $user);
         $subscriptionStatus = $latestSubscription?->status ?? 'inactive';
+        $hasSubscriptionHistory = (bool) $latestSubscription;
+        $canLoginWithOtp = $hasActiveSubscription || $hasSubscriptionHistory;
         $otpSent = false;
 
-        if ($hasActiveSubscription && $request->boolean('send_otp', false)) {
+        if ($canLoginWithOtp && $request->boolean('send_otp', false)) {
             $result = $this->issueOtp($phone, $request->input('language', 'en'));
             $otpSent = $result['success'];
         }
@@ -128,6 +132,7 @@ class AuthController extends Controller
                 'phone' => $phone,
                 'subscription_status' => $subscriptionStatus,
                 'has_active_subscription' => $hasActiveSubscription,
+                'has_subscription_history' => $hasSubscriptionHistory,
                 'can_play' => $hasActiveSubscription,
                 'otp_sent' => $otpSent,
                 'sms_short_code' => '6294',
@@ -392,6 +397,34 @@ class AuthController extends Controller
         }
 
         return $phone;
+    }
+
+    private function toBillingPhone(string $phone): string
+    {
+        return str_starts_with($phone, '+') ? substr($phone, 1) : $phone;
+    }
+
+    private function latestSubscriptionForPhone(string $normalizedPhone, ?User $user): ?Subscription
+    {
+        if ($user) {
+            $sub = $user->subscriptions()->latest('updated_at')->first();
+            if ($sub) {
+                return $sub;
+            }
+        }
+
+        $billingPhone = $this->toBillingPhone($normalizedPhone);
+
+        return Subscription::query()
+            ->where('phone', $billingPhone)
+            ->orWhere('phone', $normalizedPhone)
+            ->latest('updated_at')
+            ->first();
+    }
+
+    private function hasSubscriptionHistoryForPhone(string $normalizedPhone): bool
+    {
+        return $this->latestSubscriptionForPhone($normalizedPhone, null) !== null;
     }
 
     /**

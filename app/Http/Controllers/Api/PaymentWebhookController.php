@@ -77,16 +77,27 @@ class PaymentWebhookController extends Controller
             $rawPhone = (string) ($subscriptionData['phone'] ?? '');
             $phone = $this->normalizePhone($rawPhone); // 2519XXXXXXXX
             $userPhone = '+' . $phone; // canonical users table format
-            $user = User::whereIn('phone', $this->buildPhoneCandidates($phone))->first();
+            $phoneCandidates = $this->buildPhoneCandidates($phone);
+            $user = User::whereIn('phone', $phoneCandidates)->first();
             if (!$user) {
-                $user = User::create([
-                    'phone' => $userPhone,
-                    'name' => 'Subscriber' . substr(preg_replace('/\D/', '', $phone), -6),
-                    'password' => Hash::make(Str::random(32)),
-                    'locale' => 'en',
-                    'tokens_balance' => 0,
-                    'daily_bonus_claimed_at' => null,
-                ]);
+                try {
+                    $user = User::create([
+                        'phone' => $userPhone,
+                        'name' => 'Subscriber' . substr(preg_replace('/\D/', '', $phone), -6),
+                        'password' => Hash::make(Str::random(32)),
+                        'locale' => 'en',
+                        'tokens_balance' => 0,
+                        'daily_bonus_claimed_at' => null,
+                    ]);
+                } catch (QueryException $e) {
+                    // Concurrent webhooks can race on the same phone: load the row the other request inserted.
+                    if ($this->isDuplicateKeyIntegrityViolation($e)) {
+                        $user = User::whereIn('phone', $phoneCandidates)->first();
+                    }
+                    if (!$user) {
+                        throw $e;
+                    }
+                }
             }
 
             $subscriptionExternalId = (string) ($subscriptionData['id'] ?? '');
@@ -317,5 +328,15 @@ class PaymentWebhookController extends Controller
             'inactive', 'expired', 'cancelled' => 1,
             default => 0,
         };
+    }
+
+    private function isDuplicateKeyIntegrityViolation(QueryException $e): bool
+    {
+        $sqlState = $e->getSqlState();
+        $driverCode = isset($e->errorInfo[1]) ? (int) $e->errorInfo[1] : null;
+
+        return $sqlState === '23000'
+            || $driverCode === 1062
+            || str_contains($e->getMessage(), 'Duplicate entry');
     }
 }
