@@ -17,6 +17,8 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthController extends Controller
 {
+    private const OTP_TTL_SECONDS = 60;
+
     public function __construct(private readonly SmsService $smsService)
     {
     }
@@ -81,7 +83,7 @@ class AuthController extends Controller
             'message' => 'OTP sent successfully',
             'data' => [
                 'phone' => $phone,
-                'expires_in' => 300
+                'expires_in' => self::OTP_TTL_SECONDS
             ]
         ]);
     }
@@ -433,9 +435,9 @@ class AuthController extends Controller
     private function sendSms(string $phone, string $otp, string $language): bool
     {
         $messages = [
-            'en' => "Your Ahaz one time code is: {$otp}. Valid for 5 minutes.",
-            'am' => "የአሃዝ ማረጋገጫ ኮድዎ: {$otp}። ለ5 ደቂቃ ይቆያል።",
-            'or' => "Koodii mirkaneessaa Ahaaz keessan: {$otp}. Daqiiqaa shaniif ni tura."
+            'en' => "Your Ahaz one-time code is: {$otp}. It expires in 1 minute.",
+            'am' => "የአሃዝ የአንድ-ጊዜ ኮድዎ: {$otp}። በ1 ደቂቃ ውስጥ ያበቃል።",
+            'or' => "Koodiin yeroo tokkoo Ahaz keessanii: {$otp}. Daqiiqaa 1 keessatti xumurama."
         ];
 
         $message = $messages[$language] ?? $messages['en'];
@@ -478,7 +480,7 @@ class AuthController extends Controller
             'phone' => $phone,
             'code' => Hash::make($otpCode),
             'type' => 'login',
-            'expires_at' => now()->addMinutes(5),
+            'expires_at' => now()->addSeconds(self::OTP_TTL_SECONDS),
             'attempts' => 0,
         ]);
 
