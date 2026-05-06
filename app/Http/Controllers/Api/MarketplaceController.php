@@ -109,13 +109,6 @@ class MarketplaceController extends Controller
             /** @var User $user */
             $user = User::query()->whereKey($request->user()->id)->lockForUpdate()->firstOrFail();
 
-            if (!$user->canAffordWithLocked((float) $item->token_cost)) {
-                throw new HttpResponseException(response()->json([
-                    'success' => false,
-                    'message' => 'Insufficient available tokens',
-                ], 422));
-            }
-
             if ($user->earned_tokens_balance < $item->token_cost) {
                 throw new HttpResponseException(response()->json([
                     'success' => false,
@@ -123,7 +116,6 @@ class MarketplaceController extends Controller
                 ], 422));
             }
 
-            $user->decrement('tokens_balance', $item->token_cost);
             $user->decrement('earned_tokens_balance', $item->token_cost);
 
             $purchase = UserMarketplacePurchase::create([

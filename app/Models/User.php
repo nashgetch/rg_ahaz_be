@@ -181,7 +181,10 @@ class User extends Authenticatable
      */
     public function awardTokens(int $amount, string $type, string $description, array $meta = []): Transaction
     {
-        $this->increment('tokens_balance', $amount);
+        if ($this->shouldCreditPlayingBalance($type)) {
+            $this->increment('tokens_balance', $amount);
+        }
+
         if ($this->isEarnedRewardType($type)) {
             $this->increment('earned_tokens_balance', $amount);
         }
@@ -201,6 +204,15 @@ class User extends Authenticatable
     private function isEarnedRewardType(string $type): bool
     {
         return in_array($type, ['prize', 'bet_winnings', 'abandonment_reward'], true);
+    }
+
+    /**
+     * Determine whether this award type should increase spendable playing balance.
+     */
+    private function shouldCreditPlayingBalance(string $type): bool
+    {
+        // Game outcomes (prize) should only increase earned tokens.
+        return $type !== 'prize';
     }
 
     /**
