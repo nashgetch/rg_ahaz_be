@@ -517,9 +517,9 @@ class AuthController extends Controller
      */
      private function isValidEthiopianPhone(string $phone): bool
     {
-        // Ethiopian phone numbers: +251[79]XXXXXXXX (total 13 chars with +251)
-        // Normalized phone should be in format +251[79]XXXXXXXX
-        return preg_match('/^\+251[79]\d{8}$/', $phone);
+        // Ethiopian phone numbers: +251[7|8|9]XXXXXXXX (total 13 chars with +251)
+        // Normalized phone should be in format +251[789]XXXXXXXX
+        return preg_match('/^\+251[789]\d{8}$/', $phone);
     }
 
 } 
