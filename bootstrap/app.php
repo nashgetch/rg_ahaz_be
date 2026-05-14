@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([
             'active.subscription' => \App\Http\Middleware\EnsureActiveSubscription::class,
+            'sanctum.access' => \App\Http\Middleware\EnsureSanctumAccessToken::class,
         ]);
 
         $middleware->redirectGuestsTo(function ($request) {

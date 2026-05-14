@@ -14,6 +14,7 @@ class UserMarketplacePurchase extends Model
         'etb_value',
         'status',
         'reference',
+        'redemption_phone',
         'metadata',
         'purchased_at',
     ];

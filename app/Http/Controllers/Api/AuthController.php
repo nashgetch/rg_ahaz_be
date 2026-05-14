@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\EthiopianPhone;
 use App\Models\OTP;
 use App\Models\Subscription;
 use App\Services\SmsService;
@@ -42,8 +43,8 @@ class AuthController extends Controller
         }
 
         // Additional phone validation
-        $phone = $this->normalizePhone($request->phone);
-        if (!$this->isValidEthiopianPhone($phone)) {
+        $phone = EthiopianPhone::normalize($request->phone);
+        if (!EthiopianPhone::isValid($phone)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid Ethiopian phone number format'
@@ -107,8 +108,8 @@ class AuthController extends Controller
             ], 422);
         }
 
-        $phone = $this->normalizePhone($request->phone);
-        if (!$this->isValidEthiopianPhone($phone)) {
+        $phone = EthiopianPhone::normalize($request->phone);
+        if (!EthiopianPhone::isValid($phone)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid Ethiopian phone number format',
@@ -166,7 +167,7 @@ class AuthController extends Controller
             ], 422);
         }
 
-        $phone = $this->normalizePhone($request->phone);
+        $phone = EthiopianPhone::normalize($request->phone);
         $otpCode = $request->otp;
         $deviceName = trim((string) $request->input('device_name', 'Unknown device'));
         $currentIp = (string) ($request->ip() ?? '');
@@ -279,18 +280,19 @@ class AuthController extends Controller
         // Mark OTP as consumed only after all validations and user creation succeed.
         $otp->update(['consumed_at' => now()]);
 
-        // Generate token
-        $tokenModel = $user->createToken($deviceName);
-        $token = $tokenModel->plainTextToken;
+        // Generate token pair (short-lived access + long-lived refresh)
+        [$plainAccess, $plainRefresh, $accessModel] = $this->issueTokenPair($user, $deviceName);
         $user->forceFill([
             'last_login_at' => now(),
             'active_device_name' => $deviceName,
             'active_device_ip' => $currentIp !== '' ? $currentIp : null,
-            'active_device_token_id' => $tokenModel->accessToken->id,
+            'active_device_token_id' => $accessModel->id,
             'active_device_last_seen_at' => now(),
         ])->save();
 
-        return response()->json([
+        $accessTtlSeconds = config('auth.access_token_ttl_minutes', 15) * 60;
+
+        return $this->withRefreshCookie(response()->json([
             'success' => true,
             'message' => $isNewUser ? 'Account created successfully' : 'Login successful',
             'data' => [
@@ -307,38 +309,42 @@ class AuthController extends Controller
                     'experience' => $user->experience,
                     'can_claim_daily_bonus' => $user->canClaimDailyBonus()
                 ],
-                'token' => $token,
+                'token' => $plainAccess,
+                'expires_in' => $accessTtlSeconds,
                 'is_new_user' => $isNewUser
             ]
-        ]);
+        ]), $plainRefresh);
     }
 
     /**
-     * Refresh user token
+     * Refresh access token using a valid Bearer access token (rotates refresh as well).
      */
     public function refresh(Request $request): JsonResponse
     {
         $user = $request->user();
-        $currentToken = $request->user()->currentAccessToken();
+        $currentToken = $user->currentAccessToken();
         $tokenName = $currentToken?->name ?: ($user->active_device_name ?: 'Current device');
-        
-        // Revoke current token
-        $currentToken?->delete();
-        
-        // Create new token
-        $newToken = $user->createToken($tokenName);
-        $token = $newToken->plainTextToken;
+
+        if ($currentToken) {
+            $this->deletePairedRefreshToken($user, (int) $currentToken->id);
+            $currentToken->delete();
+        }
+
+        [$plainAccess, $plainRefresh, $accessModel] = $this->issueTokenPair($user, $tokenName);
         $user->forceFill([
             'active_device_name' => $tokenName,
             'active_device_ip' => (string) ($request->ip() ?? ''),
-            'active_device_token_id' => $newToken->accessToken->id,
+            'active_device_token_id' => $accessModel->id,
             'active_device_last_seen_at' => now(),
         ])->save();
 
-        return response()->json([
+        $accessTtlSeconds = config('auth.access_token_ttl_minutes', 15) * 60;
+
+        return $this->withRefreshCookie(response()->json([
             'success' => true,
             'data' => [
-                'token' => $token,
+                'token' => $plainAccess,
+                'expires_in' => $accessTtlSeconds,
                 'user' => [
                     'id' => $user->id,
                     'name' => $user->name,
@@ -353,7 +359,95 @@ class AuthController extends Controller
                     'can_claim_daily_bonus' => $user->canClaimDailyBonus()
                 ]
             ]
-        ]);
+        ]), $plainRefresh);
+    }
+
+    /**
+     * Exchange a long-lived refresh token for a new access + refresh pair (no Bearer access required).
+     * Refresh token is read from an HttpOnly cookie when present, otherwise from the request body (legacy).
+     */
+    public function refreshWithRefreshToken(Request $request): JsonResponse
+    {
+        $cookieName = (string) config('auth.refresh_cookie_name', 'ahaz_refresh');
+        $incoming = $request->cookie($cookieName) ?? $request->input('refresh_token');
+
+        if (!is_string($incoming) || trim($incoming) === '') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Missing refresh token',
+            ], 401);
+        }
+
+        $pat = PersonalAccessToken::findToken($incoming);
+
+        if (!$pat || !$pat->tokenable instanceof User) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid refresh token',
+            ], 401);
+        }
+
+        if (!$pat->can('refresh')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid refresh token',
+            ], 401);
+        }
+
+        if ($pat->expires_at && $pat->expires_at->isPast()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Refresh token expired',
+            ], 401);
+        }
+
+        if (!preg_match('/^refresh-for:(\d+)$/', $pat->name, $matches)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid refresh token',
+            ], 401);
+        }
+
+        /** @var User $user */
+        $user = $pat->tokenable;
+        $oldAccessId = (int) $matches[1];
+
+        PersonalAccessToken::query()
+            ->where('id', $oldAccessId)
+            ->where('tokenable_id', $user->id)
+            ->where('tokenable_type', $user->getMorphClass())
+            ->delete();
+        $pat->delete();
+
+        $deviceName = $user->active_device_name ?: 'Unknown device';
+        [$plainAccess, $plainRefresh, $accessModel] = $this->issueTokenPair($user, $deviceName);
+        $user->forceFill([
+            'active_device_token_id' => $accessModel->id,
+            'active_device_last_seen_at' => now(),
+        ])->save();
+
+        $accessTtlSeconds = config('auth.access_token_ttl_minutes', 15) * 60;
+
+        return $this->withRefreshCookie(response()->json([
+            'success' => true,
+            'data' => [
+                'token' => $plainAccess,
+                'expires_in' => $accessTtlSeconds,
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'avatar' => $user->avatar,
+                    'phone' => $user->phone,
+                    'language' => $user->locale,
+                    'tokens' => $user->tokens_balance,
+                    'earned_tokens' => $user->earned_tokens_balance,
+                    'has_active_subscription' => $user->hasActiveSubscription(),
+                    'level' => $user->level,
+                    'experience' => $user->experience,
+                    'can_claim_daily_bonus' => $user->canClaimDailyBonus(),
+                ],
+            ],
+        ]), $plainRefresh);
     }
 
     /**
@@ -363,7 +457,11 @@ class AuthController extends Controller
     {
         $user = $request->user();
         $currentToken = $user->currentAccessToken();
-        $currentToken?->delete();
+
+        if ($currentToken) {
+            $this->deletePairedRefreshToken($user, (int) $currentToken->id);
+            $currentToken->delete();
+        }
 
         $hasRemainingTokens = $user->tokens()->exists();
         if (!$hasRemainingTokens) {
@@ -375,30 +473,10 @@ class AuthController extends Controller
             ])->save();
         }
 
-        return response()->json([
+        return $this->withRefreshCookie(response()->json([
             'success' => true,
             'message' => 'Logged out successfully'
-        ]);
-    }
-
-    /**
-     * Normalize Ethiopian phone number
-     */
-    private function normalizePhone(string $phone): string
-    {
-        // Remove spaces and special characters
-        $phone = preg_replace('/[^\d+]/', '', $phone);
-        
-        // Convert to international format
-        if (str_starts_with($phone, '0')) {
-            $phone = '+251' . substr($phone, 1);
-        } elseif (str_starts_with($phone, '251')) {
-            $phone = '+' . $phone;
-        } elseif (!str_starts_with($phone, '+251')) {
-            $phone = '+251' . $phone;
-        }
-
-        return $phone;
+        ]), null);
     }
 
     private function toBillingPhone(string $phone): string
@@ -509,17 +587,64 @@ class AuthController extends Controller
         return $user->tokens()
             ->orderByDesc('last_used_at')
             ->orderByDesc('created_at')
-            ->first();
+            ->get()
+            ->first(function (PersonalAccessToken $t) {
+                $abilities = $t->abilities ?? [];
+
+                return in_array('*', $abilities, true) || in_array('access', $abilities, true);
+            });
     }
 
     /**
-     * Validate Ethiopian phone number format
+     * @return array{0: string, 1: string, 2: PersonalAccessToken}
      */
-     private function isValidEthiopianPhone(string $phone): bool
+    private function issueTokenPair(User $user, string $deviceName): array
     {
-        // Ethiopian phone numbers: +251[7|8|9]XXXXXXXX (total 13 chars with +251)
-        // Normalized phone should be in format +251[789]XXXXXXXX
-        return preg_match('/^\+251[789]\d{8}$/', $phone);
+        $accessMinutes = max(1, (int) config('auth.access_token_ttl_minutes', 15));
+        $refreshDays = max(1, (int) config('auth.refresh_token_ttl_days', 60));
+
+        $access = $user->createToken($deviceName, ['access'], now()->addMinutes($accessMinutes));
+        $accessModel = $access->accessToken;
+        $refresh = $user->createToken('refresh-for:' . $accessModel->id, ['refresh'], now()->addDays($refreshDays));
+
+        return [$access->plainTextToken, $refresh->plainTextToken, $accessModel];
+    }
+
+    private function deletePairedRefreshToken(User $user, int $accessTokenId): void
+    {
+        PersonalAccessToken::query()
+            ->where('tokenable_id', $user->id)
+            ->where('tokenable_type', $user->getMorphClass())
+            ->where('name', 'refresh-for:' . $accessTokenId)
+            ->delete();
+    }
+
+    private function withRefreshCookie(JsonResponse $response, ?string $plainRefresh): JsonResponse
+    {
+        $name = (string) config('auth.refresh_cookie_name', 'ahaz_refresh');
+        $path = (string) config('auth.refresh_cookie_path', '/');
+        $domain = config('auth.refresh_cookie_domain');
+        $domainStr = is_string($domain) && $domain !== '' ? $domain : null;
+        $secure = (bool) config('auth.refresh_cookie_secure', true);
+        $sameSite = strtolower((string) config('auth.refresh_cookie_same_site', 'lax'));
+
+        if ($plainRefresh === null) {
+            return $response->withoutCookie($name, $path, $domainStr);
+        }
+
+        $minutes = max(1, (int) config('auth.refresh_token_ttl_days', 60)) * 24 * 60;
+
+        return $response->withCookie(cookie(
+            $name,
+            $plainRefresh,
+            $minutes,
+            $path,
+            $domainStr,
+            $secure,
+            true,
+            false,
+            $sameSite,
+        ));
     }
 
 } 

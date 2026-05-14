@@ -1,5 +1,13 @@
 <?php
 
+$allowedOrigins = array_values(array_filter(array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGINS', '')))));
+$supportsCredentials = filter_var(env('CORS_SUPPORTS_CREDENTIALS', false), FILTER_VALIDATE_BOOLEAN);
+
+// Wildcard origins are incompatible with credentialed requests; fall back safely if misconfigured.
+if ($supportsCredentials && $allowedOrigins === []) {
+    $supportsCredentials = false;
+}
+
 return [
 
     /*
@@ -19,7 +27,7 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => $supportsCredentials ? $allowedOrigins : ($allowedOrigins !== [] ? $allowedOrigins : ['*']),
 
     'allowed_origins_patterns' => [],
 
@@ -29,6 +37,6 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => false,
+    'supports_credentials' => $supportsCredentials,
 
-]; 
+];

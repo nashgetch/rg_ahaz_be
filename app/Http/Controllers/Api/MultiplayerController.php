@@ -151,6 +151,21 @@ class MultiplayerController extends Controller
             ], 404);
         }
 
+        $inActiveRoom = MultiplayerParticipant::query()
+            ->where('user_id', $user->id)
+            ->whereIn('status', ['joined', 'ready', 'playing', 'disconnected', 'replay_pending'])
+            ->whereHas('room', function ($q) {
+                $q->whereIn('status', ['waiting', 'starting', 'in_progress', 'replay_waiting']);
+            })
+            ->exists();
+
+        if ($inActiveRoom) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You already have an active multiplayer room. Leave or finish it before creating another.',
+            ], 409);
+        }
+
         // Check if user can start a new game (strict betting enforcement)
         $canPlay = $this->bettingService->canUserStartNewGame($user);
         if (!$canPlay['can_play']) {
@@ -204,25 +219,76 @@ class MultiplayerController extends Controller
     }
 
     /**
-     * Get room details
+     * Get room details (access-controlled; private rooms require membership / invite).
      */
-    public function show(string $roomCode): JsonResponse
+    public function show(Request $request, string $roomCode): JsonResponse
     {
-        $room = MultiplayerRoom::with(['host:id,name', 'game:id,title,slug,mechanic', 'participants.user:id,name'])
+        $user = Auth::user();
+        $room = MultiplayerRoom::with(['host:id,name', 'game:id,title,slug,mechanic,category,token_cost', 'participants.user:id,name'])
             ->where('room_code', $roomCode)
             ->first();
 
         if (!$room) {
             return response()->json([
                 'success' => false,
-                'message' => 'Room not found'
+                'message' => 'Room not found',
             ], 404);
+        }
+
+        $participant = $room->participants()->where('user_id', $user->id)->first();
+
+        if ($participant) {
+            return response()->json([
+                'success' => true,
+                'data' => $room,
+            ]);
+        }
+
+        if ($room->is_private) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have access to this room',
+            ], 403);
+        }
+
+        $joinablePublicPreview = $room->status === 'waiting'
+            && $room->current_players < $room->max_players;
+
+        if (!$joinablePublicPreview) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have access to this room',
+            ], 403);
         }
 
         return response()->json([
             'success' => true,
-            'data' => $room
+            'data' => $this->buildPublicRoomPreview($room),
         ]);
+    }
+
+    /**
+     * Minimal room payload for join links (no participant list, no game state).
+     */
+    private function buildPublicRoomPreview(MultiplayerRoom $room): array
+    {
+        $game = $room->game;
+
+        return [
+            'id' => $room->id,
+            'room_code' => $room->room_code,
+            'room_name' => $room->room_name,
+            'description' => $room->description,
+            'status' => $room->status,
+            'max_players' => $room->max_players,
+            'current_players' => $room->current_players,
+            'is_private' => $room->is_private,
+            'game_duration' => $room->game_duration,
+            'host' => $room->host,
+            'game' => $game,
+            'entry_fee' => $game?->token_cost ?? 0,
+            'participants' => [],
+        ];
     }
 
     /**

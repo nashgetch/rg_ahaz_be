@@ -8,6 +8,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserMarketplacePurchase;
 use App\Services\SmsService;
+use App\Support\EthiopianPhone;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
@@ -64,6 +65,7 @@ class MarketplaceController extends Controller
                     'token_cost' => $purchase->token_cost,
                     'etb_value' => (float) $purchase->etb_value,
                     'purchased_at' => $purchase->purchased_at,
+                    'redemption_phone' => $purchase->redemption_phone,
                     'item' => [
                         'id' => $purchase->item?->id,
                         'code' => $purchase->item?->code,
@@ -83,6 +85,7 @@ class MarketplaceController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'item_id' => 'required|integer|exists:marketplace_items,id',
+            'redemption_phone' => 'nullable|string|max:20',
         ]);
 
         if ($validator->fails()) {
@@ -105,7 +108,29 @@ class MarketplaceController extends Controller
             ], 422);
         }
 
-        $purchase = DB::transaction(function () use ($request, $item) {
+        $redemptionPhone = null;
+        if ($this->isAirtimeItem($item)) {
+            $phoneRaw = $request->input('redemption_phone');
+            if ($phoneRaw === null || trim((string) $phoneRaw) === '') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Phone number is required for airtime rewards',
+                    'errors' => ['redemption_phone' => ['Please enter the phone number that should receive the airtime.']],
+                ], 422);
+            }
+
+            $normalized = EthiopianPhone::normalize((string) $phoneRaw);
+            if (!EthiopianPhone::isValid($normalized)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid Ethiopian phone number for airtime delivery',
+                    'errors' => ['redemption_phone' => ['Enter a valid Ethiopian mobile number (9XXXXXXXX).']],
+                ], 422);
+            }
+            $redemptionPhone = $normalized;
+        }
+
+        $purchase = DB::transaction(function () use ($request, $item, $redemptionPhone) {
             /** @var User $user */
             $user = User::query()->whereKey($request->user()->id)->lockForUpdate()->firstOrFail();
 
@@ -125,6 +150,7 @@ class MarketplaceController extends Controller
                 'etb_value' => $item->etb_value,
                 'status' => 'completed',
                 'reference' => $this->generatePurchaseReference(),
+                'redemption_phone' => $redemptionPhone,
                 'metadata' => [
                     'item_code' => $item->code,
                     'category' => $item->category,
@@ -137,11 +163,12 @@ class MarketplaceController extends Controller
                 'amount' => -$item->token_cost,
                 'type' => 'powerup',
                 'description' => "Marketplace redemption: {$item->name}",
-                'meta' => [
+                'meta' => array_filter([
                     'marketplace_purchase_id' => $purchase->id,
                     'marketplace_item_id' => $item->id,
                     'item_code' => $item->code,
-                ],
+                    'redemption_phone' => $redemptionPhone,
+                ]),
                 'status' => 'completed',
                 'reference' => $purchase->reference,
             ]);
@@ -163,6 +190,7 @@ class MarketplaceController extends Controller
                     'token_cost' => $createdPurchase->token_cost,
                     'etb_value' => (float) $createdPurchase->etb_value,
                     'purchased_at' => $createdPurchase->purchased_at,
+                    'redemption_phone' => $createdPurchase->redemption_phone,
                     'item' => [
                         'id' => $createdPurchase->item?->id,
                         'code' => $createdPurchase->item?->code,
@@ -180,6 +208,13 @@ class MarketplaceController extends Controller
         ]);
     }
 
+    private function isAirtimeItem(MarketplaceItem $item): bool
+    {
+        $category = strtolower((string) $item->category);
+
+        return str_contains($category, 'airtime');
+    }
+
     private function generatePurchaseReference(): string
     {
         return 'MKP-' . now()->format('YmdHis') . '-' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
@@ -187,7 +222,8 @@ class MarketplaceController extends Controller
 
     private function sendMarketplaceRedemptionSms(User $user, UserMarketplacePurchase $purchase): void
     {
-        if (empty($user->phone) || empty($purchase->item?->name)) {
+        $destination = $purchase->redemption_phone ?: $user->phone;
+        if (empty($destination) || empty($purchase->item?->name)) {
             return;
         }
 
@@ -196,11 +232,11 @@ class MarketplaceController extends Controller
             ? "እንኳን ደስ አለዎት! {$purchase->item->name} ሽልማትዎን በተሳካ ሁኔታ ተቀብለዋል። አመሰግናለን - AHAZ"
             : "Congratulations! You successfully redeemed {$purchase->item->name}. Thank you for playing on AHAZ.";
 
-        $smsResult = $this->smsService->sendOtp($user->phone, $message);
+        $smsResult = $this->smsService->sendOtp($destination, $message);
         if (!($smsResult['success'] ?? false)) {
             Log::warning('Marketplace redemption SMS failed.', [
                 'user_id' => $user->id,
-                'phone' => $user->phone,
+                'phone' => $destination,
                 'purchase_id' => $purchase->id,
                 'reference' => $purchase->reference,
                 'item_name' => $purchase->item?->name,

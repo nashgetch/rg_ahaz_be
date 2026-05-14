@@ -36,7 +36,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/send-otp', [AuthController::class, 'sendOtp']);
     Route::post('/auth/subscription-status', [AuthController::class, 'subscriptionStatus']);
     Route::post('/auth/verify-otp', [AuthController::class, 'verifyOtp']);
-    Route::post('/auth/refresh', [AuthController::class, 'refresh']);
+    Route::post('/auth/refresh-token', [AuthController::class, 'refreshWithRefreshToken']);
     
     // Public game info
     Route::get('/games', [GameController::class, 'index']);
@@ -118,7 +118,7 @@ Route::post('/broadcasting/auth', function (Request $request) {
         ]);
         return response()->json(['message' => $e->getMessage()], 403);
     }
-})->middleware('auth:sanctum');
+})->middleware(['auth:sanctum', 'sanctum.access']);
 
 // Temporary test route for WebSocket without auth (for debugging)
 Route::post('/broadcasting/auth-test', function (Request $request) {
@@ -213,13 +213,14 @@ Route::post('/debug/ping-websocket', function (Request $request) {
 });
 
 // Protected routes
-Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+Route::prefix('v1')->middleware(['auth:sanctum', 'sanctum.access'])->group(function () {
     // User management
     Route::get('/user', [UserController::class, 'profile']);
     Route::get('/users/{user}', [UserController::class, 'show']);
     Route::put('/user', [UserController::class, 'updateProfile']);
     Route::post('/user/claim-daily-bonus', [UserController::class, 'claimDailyBonus']);
     Route::get('/user/badge', [UserController::class, 'badge']);
+    Route::post('/auth/refresh', [AuthController::class, 'refresh']);
     Route::delete('/auth/logout', [AuthController::class, 'logout']);
     
     // Profile management
@@ -245,7 +246,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::prefix('multiplayer')->middleware('active.subscription')->group(function () {
         Route::get('/rooms', [MultiplayerController::class, 'index']);
         Route::get('/my-active-room', [MultiplayerController::class, 'getMyActiveRoom']);
-        Route::post('/rooms', [MultiplayerController::class, 'create']);
+        Route::post('/rooms', [MultiplayerController::class, 'create'])->middleware('throttle:multiplayer-room-create');
         Route::get('/rooms/{roomCode}', [MultiplayerController::class, 'show']);
         Route::post('/rooms/{roomCode}/join', [MultiplayerController::class, 'join']);
         Route::post('/rooms/{roomCode}/leave', [MultiplayerController::class, 'leave']);

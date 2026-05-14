@@ -12,6 +12,10 @@ class MultiplayerRoom extends Model
 {
     use HasFactory;
 
+    protected $hidden = [
+        'password',
+    ];
+
     protected $fillable = [
         'room_code',
         'host_user_id',

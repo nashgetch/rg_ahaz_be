@@ -107,9 +107,12 @@ class PaymentWebhookController extends Controller
             $expiresAt = !empty($subscriptionData['expires_at']) ? Carbon::parse((string) $subscriptionData['expires_at']) : null;
             $insertedAt = !empty($subscriptionData['inserted_at']) ? Carbon::parse((string) $subscriptionData['inserted_at']) : now();
             $updatedAt = !empty($subscriptionData['updated_at']) ? Carbon::parse((string) $subscriptionData['updated_at']) : now();
+            $activeOnDate = strtolower($status) === 'active'
+                ? ($activationDate ?? $updatedAt)->toDateString()
+                : ($activationDate ?? $insertedAt)->toDateString();
             $tokensToAward = (int) env('SUBSCRIPTION_DAILY_TOKENS', 100);
 
-            DB::transaction(function () use ($request, $user, $phone, $subscriptionExternalId, $status, $activationDate, $trialEnd, $expiresAt, $insertedAt, $updatedAt, $tokensToAward): void {
+            DB::transaction(function () use ($request, $user, $phone, $subscriptionExternalId, $status, $activationDate, $trialEnd, $expiresAt, $insertedAt, $updatedAt, $activeOnDate, $tokensToAward): void {
                 $subscriptionValues = [
                     'user_id' => $user->id,
                     'subscription_id' => $subscriptionExternalId,
@@ -122,10 +125,9 @@ class PaymentWebhookController extends Controller
                     'trial_end' => $trialEnd,
                     'activation_date' => $activationDate,
                     'expires_at' => $expiresAt,
-                    'active_on_date' => ($activationDate ?? $insertedAt)->toDateString(),
+                    'active_on_date' => $activeOnDate,
                     'provider_reference' => $subscriptionExternalId,
                     'amount_etb' => (float) env('SUBSCRIPTION_DAILY_PRICE_ETB', 2),
-                    'tokens_awarded' => 0,
                     'starts_at' => $activationDate ?? $insertedAt,
                     'ends_at' => $expiresAt ?? $trialEnd ?? now(),
                     'paid_at' => $activationDate,
@@ -137,10 +139,7 @@ class PaymentWebhookController extends Controller
                 // 1) lock any existing row for this provider reference
                 // 2) create if missing (with duplicate-key fallback for concurrent inserts)
                 // 3) apply incoming state only if it's newer or equal-but-stronger
-                $subscription = Subscription::query()
-                    ->where('provider_reference', $subscriptionExternalId)
-                    ->lockForUpdate()
-                    ->first();
+                $subscription = $this->findSubscriptionByProviderReference($subscriptionExternalId, true);
 
                 if (!$subscription) {
                     try {
@@ -150,10 +149,11 @@ class PaymentWebhookController extends Controller
                         ]);
                     } catch (QueryException $e) {
                         // Concurrent request inserted first; load and continue as update.
-                        $subscription = Subscription::query()
-                            ->where('provider_reference', $subscriptionExternalId)
-                            ->lockForUpdate()
-                            ->first();
+                        if (!$this->isDuplicateKeyIntegrityViolation($e)) {
+                            throw $e;
+                        }
+
+                        $subscription = $this->findSubscriptionByProviderReference($subscriptionExternalId, true);
 
                         if (!$subscription) {
                             throw $e;
@@ -177,13 +177,14 @@ class PaymentWebhookController extends Controller
 
                 $subscription->refresh();
                 $effectiveStatus = strtolower((string) $subscription->status);
-                $isEligible = in_array($effectiveStatus, ['active', 'trial', 'pending'], true);
-                $shouldAward = $isEligible;
+                $hasAccess = $this->subscriptionHasCurrentAccess($subscription);
+                $shouldAward = $hasAccess && in_array($effectiveStatus, ['active', 'trial', 'pending'], true);
+                $awardReference = $this->subscriptionAwardReference($subscriptionExternalId, $effectiveStatus, $activeOnDate);
 
                 if ($shouldAward) {
                     $alreadyAwarded = $user->transactions()
                         ->where('type', 'purchase')
-                        ->where('reference', 'sub:' . $subscriptionExternalId)
+                        ->where('reference', $awardReference)
                         ->exists();
 
                     if (!$alreadyAwarded) {
@@ -195,30 +196,27 @@ class PaymentWebhookController extends Controller
                             'meta' => [
                                 'subscription_id' => $subscriptionExternalId,
                                 'status' => $effectiveStatus,
+                                'active_on_date' => $activeOnDate,
                             ],
                             'status' => 'completed',
-                            'reference' => 'sub:' . $subscriptionExternalId,
+                            'reference' => $awardReference,
                         ]);
 
-                        $subscription->update(['tokens_awarded' => $tokensToAward]);
+                        $subscription->update(['tokens_awarded' => (int) $subscription->tokens_awarded + $tokensToAward]);
                     }
                 } else {
                     $alreadyAwarded = $user->transactions()
                         ->where('type', 'purchase')
-                        ->where('reference', 'sub:' . $subscriptionExternalId)
+                        ->where('reference', $awardReference)
                         ->exists();
 
                     if ($alreadyAwarded) {
-                        $subscription->update(['tokens_awarded' => $tokensToAward]);
-                    } else {
-                        $subscription->update(['tokens_awarded' => 0]);
+                        $subscription->update(['tokens_awarded' => max((int) $subscription->tokens_awarded, $tokensToAward)]);
                     }
                 }
             });
 
-            $persistedSubscription = Subscription::query()
-                ->where('provider_reference', $subscriptionExternalId)
-                ->first();
+            $persistedSubscription = $this->findSubscriptionByProviderReference($subscriptionExternalId);
             $responseStatus = $persistedSubscription?->status ?? $status;
 
             $response = [
@@ -330,9 +328,50 @@ class PaymentWebhookController extends Controller
         };
     }
 
+    private function subscriptionHasCurrentAccess(Subscription $subscription): bool
+    {
+        $status = strtolower((string) $subscription->status);
+
+        if ($status === 'active') {
+            return !$subscription->expires_at || $subscription->expires_at->gte(now());
+        }
+
+        if (in_array($status, ['trial', 'pending'], true)) {
+            return !$subscription->trial_end || $subscription->trial_end->gte(now());
+        }
+
+        return false;
+    }
+
+    private function subscriptionAwardReference(string $subscriptionExternalId, string $status, string $activeOnDate): string
+    {
+        if ($status === 'active') {
+            return 'sub:' . $subscriptionExternalId . ':active:' . $activeOnDate;
+        }
+
+        // Trial and pending keep their existing one-time welcome award behavior.
+        return 'sub:' . $subscriptionExternalId;
+    }
+
+    private function findSubscriptionByProviderReference(string $providerReference, bool $lockForUpdate = false): ?Subscription
+    {
+        $query = Subscription::query()
+            ->where(function ($query) use ($providerReference): void {
+                $query->where('provider_reference', $providerReference)
+                    ->orWhere('subscription_id', $providerReference)
+                    ->orWhere('provider_subscription_id', $providerReference);
+            });
+
+        if ($lockForUpdate) {
+            $query->lockForUpdate();
+        }
+
+        return $query->first();
+    }
+
     private function isDuplicateKeyIntegrityViolation(QueryException $e): bool
     {
-        $sqlState = $e->getSqlState();
+        $sqlState = isset($e->errorInfo[0]) ? (string) $e->errorInfo[0] : (string) $e->getCode();
         $driverCode = isset($e->errorInfo[1]) ? (int) $e->errorInfo[1] : null;
 
         return $sqlState === '23000'

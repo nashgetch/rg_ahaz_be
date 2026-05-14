@@ -116,4 +116,25 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | API token lifetimes (Sanctum)
+    |--------------------------------------------------------------------------
+    */
+    'access_token_ttl_minutes' => (int) env('ACCESS_TOKEN_TTL_MINUTES', 15),
+    'refresh_token_ttl_days' => (int) env('REFRESH_TOKEN_TTL_DAYS', 60),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Refresh token cookie (HttpOnly — not readable by JavaScript)
+    |--------------------------------------------------------------------------
+    | For cross-origin SPA + API, set CORS_ALLOWED_ORIGINS and CORS_SUPPORTS_CREDENTIALS=true,
+    | and set domain / same_site / secure for your deployment.
+    */
+    'refresh_cookie_name' => env('REFRESH_TOKEN_COOKIE_NAME', 'ahaz_refresh'),
+    'refresh_cookie_path' => env('REFRESH_TOKEN_COOKIE_PATH', '/'),
+    'refresh_cookie_domain' => env('REFRESH_TOKEN_COOKIE_DOMAIN'),
+    'refresh_cookie_secure' => filter_var(env('REFRESH_TOKEN_COOKIE_SECURE', true), FILTER_VALIDATE_BOOLEAN),
+    'refresh_cookie_same_site' => env('REFRESH_TOKEN_COOKIE_SAMESITE', 'lax'),
+
 ];
