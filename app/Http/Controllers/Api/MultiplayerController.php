@@ -151,18 +151,26 @@ class MultiplayerController extends Controller
             ], 404);
         }
 
-        $inActiveRoom = MultiplayerParticipant::query()
+        // One active lobby/match at a time — align with getMyActiveRoom (waiting | starting | in_progress).
+        // Do not count invitations or finished players; do not use replay_waiting here (UI "active room" omits it).
+        $blockingParticipant = MultiplayerParticipant::query()
             ->where('user_id', $user->id)
-            ->whereIn('status', ['joined', 'ready', 'playing', 'disconnected', 'replay_pending'])
+            ->whereNotIn('status', ['invited', 'finished'])
             ->whereHas('room', function ($q) {
-                $q->whereIn('status', ['waiting', 'starting', 'in_progress', 'replay_waiting']);
+                $q->whereIn('status', ['waiting', 'starting', 'in_progress']);
             })
-            ->exists();
+            ->with(['room:id,room_code,status'])
+            ->first();
 
-        if ($inActiveRoom) {
+        if ($blockingParticipant && $blockingParticipant->room) {
             return response()->json([
                 'success' => false,
                 'message' => 'You already have an active multiplayer room. Leave or finish it before creating another.',
+                'data' => [
+                    'room_code' => $blockingParticipant->room->room_code,
+                    'room_status' => $blockingParticipant->room->status,
+                    'participant_status' => $blockingParticipant->status,
+                ],
             ], 409);
         }
 
@@ -224,7 +232,7 @@ class MultiplayerController extends Controller
     public function show(Request $request, string $roomCode): JsonResponse
     {
         $user = Auth::user();
-        $room = MultiplayerRoom::with(['host:id,name', 'game:id,title,slug,mechanic,category,token_cost', 'participants.user:id,name'])
+        $room = MultiplayerRoom::with(['host:id,name', 'game:id,title,slug,mechanic,token_cost', 'participants.user:id,name'])
             ->where('room_code', $roomCode)
             ->first();
 
